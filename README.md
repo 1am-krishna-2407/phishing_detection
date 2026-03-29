@@ -33,19 +33,20 @@ All Outputs ─────────────► Fusion Model (Phase 3)
 
 ## 📁 Project Structure
 
+```
 PHISHING DETECTION/
 │
-├── data/                # Dataset (not included in repo)
+├── data/                      # Dataset (not included in repo)
 │   ├── phase1/
 │   ├── phase2/
 │
-├── models/              # Pretrained models (not included)
+├── models/                    # Pretrained models (not included)
 │   ├── fusion_model_phase3.pt
 │   ├── image_model_phase2.pt
 │   ├── ocr_text_encoder_phase2_5.pt
 │   └── text_encoder_phase1.pt
 │
-├── notebooks/           # Training & inference scripts
+├── notebooks/                 # Training & inference scripts
 │   ├── train_text_phase1.py
 │   ├── train_image_phase2.py
 │   ├── train_ocr_text_phase2_5.py
@@ -54,14 +55,14 @@ PHISHING DETECTION/
 │   ├── infer_url_text.py
 │   └── final_fusion_infer.py
 │
-├── plots/               # Evaluation results
+├── plots/                     # Evaluation results
 │   ├── confusion_matrix.png
 │   ├── precision_recall_curve.png
 │   └── roc_curve.png
 │
-├── preds/               # Model predictions
+├── preds/                     # Model predictions
 │
-├── src/                 # Core implementation
+├── src/                       # Core implementation
 │   ├── image_dataset.py
 │   ├── image_model.py
 │   ├── ocr_extractor.py
@@ -71,8 +72,7 @@ PHISHING DETECTION/
 ├── requirements.txt
 ├── README.md
 └── .gitignore
-
----
+```
 
 ## 📦 Models & Dataset
 
