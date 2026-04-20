@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -16,7 +18,8 @@ import numpy as np
 import pandas as pd
 import pytesseract
 import torch
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub.utils import tqdm as hf_tqdm
 from PIL import Image
 from torchvision import transforms
 from transformers import AutoTokenizer
@@ -40,6 +43,15 @@ THRESHOLD_CONFIG_PATH = MODELS_DIR / "branch_thresholds.json"
 HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing_detection").strip()
 HF_MODEL_REVISION = os.getenv("HF_MODEL_REVISION", "").strip() or None
 HF_MODEL_TOKEN = os.getenv("HF_TOKEN", "").strip() or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip() or None
+HF_TOKENIZER_REPO_ID = os.getenv("HF_TOKENIZER_REPO_ID", "distilbert-base-uncased").strip()
+HF_TOKENIZER_DIR = MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
+HF_TOKENIZER_PATTERNS = (
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "vocab.txt",
+)
 
 IMAGE_TRANSFORM = transforms.Compose(
     [
@@ -83,6 +95,10 @@ class ServiceConfigurationError(RuntimeError):
     """Raised when required runtime assets are unavailable."""
 
 
+logger = logging.getLogger(__name__)
+_download_log_lock = threading.Lock()
+
+
 @dataclass(frozen=True)
 class PredictionResult:
     prediction: str
@@ -107,6 +123,48 @@ DEFAULT_BRANCHES: tuple[BranchConfig, ...] = (
 )
 
 
+def _emit_runtime_log(message: str) -> None:
+    with _download_log_lock:
+        logger.info(message)
+        print(message, flush=True)
+
+
+class _LoggingTqdm(hf_tqdm):
+    """Logs download progress to Streamlit/runtime logs every 5%."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_logged_percent = -5
+        self._label = self.desc or "Hugging Face download"
+
+    def _format_progress(self) -> str | None:
+        if not self.total:
+            return None
+
+        percent = int((self.n / self.total) * 100)
+        if percent < 100 and percent < self._last_logged_percent + 5:
+            return None
+
+        self._last_logged_percent = 100 if percent >= 100 else percent - (percent % 5)
+        downloaded_mb = self.n / (1024 * 1024)
+        total_mb = self.total / (1024 * 1024)
+        return f"{self._label}: {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)"
+
+    def update(self, n: int = 1) -> None:
+        super().update(n)
+        message = self._format_progress()
+        if message:
+            _emit_runtime_log(message)
+
+    def close(self) -> None:
+        if self.total and self.n >= self.total and self._last_logged_percent < 100:
+            downloaded_mb = self.n / (1024 * 1024)
+            total_mb = self.total / (1024 * 1024)
+            _emit_runtime_log(f"{self._label}: 100% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
+            self._last_logged_percent = 100
+        super().close()
+
+
 def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -124,12 +182,16 @@ def _download_from_hugging_face(target_path: Path) -> Path:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
+        _emit_runtime_log(
+            f"Starting Hugging Face model download for `{target_path.name}` from `{HF_MODEL_REPO_ID}`."
+        )
         downloaded_path = hf_hub_download(
             repo_id=HF_MODEL_REPO_ID,
             filename=target_path.name,
             revision=HF_MODEL_REVISION,
             token=HF_MODEL_TOKEN,
             local_dir=MODELS_DIR,
+            tqdm_class=_LoggingTqdm,
         )
     except Exception as exc:
         raise ServiceConfigurationError(
@@ -137,6 +199,7 @@ def _download_from_hugging_face(target_path: Path) -> Path:
             f"`{HF_MODEL_REPO_ID}`. Check the repo contents and any required token."
         ) from exc
 
+    _emit_runtime_log(f"Finished Hugging Face model download for `{target_path.name}`.")
     return Path(downloaded_path)
 
 
@@ -169,11 +232,33 @@ def _load_text_checkpoint(
 
 
 @lru_cache(maxsize=1)
+def get_distilbert_tokenizer() -> AutoTokenizer:
+    try:
+        return AutoTokenizer.from_pretrained(HF_TOKENIZER_DIR, local_files_only=True)
+    except Exception:
+        HF_TOKENIZER_DIR.mkdir(parents=True, exist_ok=True)
+        _emit_runtime_log(
+            f"Starting Hugging Face tokenizer download for `{HF_TOKENIZER_REPO_ID}`."
+        )
+        snapshot_download(
+            repo_id=HF_TOKENIZER_REPO_ID,
+            token=HF_MODEL_TOKEN,
+            local_dir=HF_TOKENIZER_DIR,
+            allow_patterns=list(HF_TOKENIZER_PATTERNS),
+            tqdm_class=_LoggingTqdm,
+        )
+        _emit_runtime_log(
+            f"Finished Hugging Face tokenizer download for `{HF_TOKENIZER_REPO_ID}`."
+        )
+        return AutoTokenizer.from_pretrained(HF_TOKENIZER_DIR, local_files_only=True)
+
+
+@lru_cache(maxsize=1)
 def get_url_bundle() -> tuple[TextPhishingModel, AutoTokenizer, int, torch.device]:
     device = get_device()
     model = TextPhishingModel().to(device)
     max_len = _load_text_checkpoint(model, TEXT_MODEL_PATH, device)
-    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+    tokenizer = get_distilbert_tokenizer()
     return model, tokenizer, max_len, device
 
 
@@ -182,7 +267,7 @@ def get_ocr_bundle() -> tuple[TextPhishingModel, AutoTokenizer, int, torch.devic
     device = get_device()
     model = TextPhishingModel().to(device)
     max_len = _load_text_checkpoint(model, OCR_MODEL_PATH, device)
-    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+    tokenizer = get_distilbert_tokenizer()
     return model, tokenizer, max_len, device
 
 
