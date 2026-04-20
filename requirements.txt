@@ -1,0 +1,10 @@
+huggingface_hub>=0.30
+numpy>=1.26
+opencv-python>=4.9
+pandas>=2.2
+pillow>=10.0
+pytesseract>=0.3.10
+streamlit>=1.44
+torch>=2.2
+torchvision>=0.17
+transformers>=4.40
