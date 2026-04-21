@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 
 import pandas as pd
 import streamlit as st
@@ -10,8 +11,16 @@ from src.dashboard_service import (
     append_url_log,
     delete_url_log_entry,
     get_runtime_diagnostics,
+    get_warmup_status,
     predict_phishing,
     read_url_logs,
+    start_background_warmup,
+)
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"Accessing `__path__` from `\.models\..*`\. Returning `__path__` instead\.",
+    category=FutureWarning,
 )
 
 
@@ -34,6 +43,15 @@ def _load_logs() -> pd.DataFrame:
 
 st.title("Phishing Detection Dashboard")
 st.caption("Check pasted URLs and uploaded screenshots, then keep a history of URL prediction results.")
+
+start_background_warmup()
+warmup_status = get_warmup_status()
+if warmup_status["state"] == "running":
+    st.info("Preparing the URL model in the background. The app is usable while it warms up.")
+elif warmup_status["state"] == "error":
+    st.warning(
+        "The hosted URL model could not be prepared yet. URL checks will use the fast fallback until assets are ready."
+    )
 
 diagnostics = get_runtime_diagnostics()
 if diagnostics:
