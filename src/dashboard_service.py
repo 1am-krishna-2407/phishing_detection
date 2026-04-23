@@ -15,8 +15,12 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import pandas as pd
-os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
-os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")
+
+# Disable hf_transfer/Xet-backed downloads so the app uses the standard
+# Hugging Face client path, which is more reliable in constrained runtimes.
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
 
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import tqdm as hf_tqdm
@@ -37,24 +41,21 @@ URL_LOG_PATH = LOGS_DIR / "url_prediction_log.csv"
 
 TEXT_MODEL_PATH = MODELS_DIR / "text_model_phase1.pt"
 OCR_MODEL_PATH = MODELS_DIR / "ocr_text_model_phase2_5.pt"
+TEXT_MODEL_QUANTIZED_PATH = MODELS_DIR / "text_model_phase1_dynamic_int8.pt"
+OCR_MODEL_QUANTIZED_PATH = MODELS_DIR / "ocr_text_model_phase2_5_dynamic_int8.pt"
 IMAGE_MODEL_PATH = MODELS_DIR / "image_model_phase2.pt"
 THRESHOLD_CONFIG_PATH = MODELS_DIR / "branch_thresholds.json"
 
-HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing_detection").strip()
+HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing-detection-models").strip()
 HF_MODEL_REVISION = os.getenv("HF_MODEL_REVISION", "").strip() or None
 HF_MODEL_TOKEN = os.getenv("HF_TOKEN", "").strip() or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip() or None
-HF_AUTO_DOWNLOAD = os.getenv("HF_AUTO_DOWNLOAD", "1").strip().lower() in {"1", "true", "yes"}
 HF_CACHE_DIR = os.getenv("HF_HOME", "").strip() or os.getenv("HUGGINGFACE_HUB_CACHE", "").strip() or None
 HF_TOKENIZER_REPO_ID = os.getenv("HF_TOKENIZER_REPO_ID", "distilbert-base-uncased").strip()
 HF_TOKENIZER_REVISION = os.getenv("HF_TOKENIZER_REVISION", "").strip() or None
 HF_TOKENIZER_DIR = MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
-PRELOAD_URL_MODEL = os.getenv("PRELOAD_URL_MODEL", "1").strip().lower() in {"1", "true", "yes"}
 HF_TOKENIZER_PATTERNS = (
-    "config.json",
     "tokenizer.json",
     "tokenizer_config.json",
-    "special_tokens_map.json",
-    "vocab.txt",
 )
 
 LOG_COLUMNS = [
@@ -87,6 +88,95 @@ TRUSTED_DOMAINS = {
     "netflix.com",
 }
 
+RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "full").strip().lower() or "full"
+if RUNTIME_PROFILE == "lightweight":
+    # Lightweight mode is intentionally disabled for local runtime stability.
+    RUNTIME_PROFILE = "full"
+if RUNTIME_PROFILE not in {"instant", "balanced", "full"}:
+    RUNTIME_PROFILE = "full"
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+PROFILE_DEFAULTS = {
+    "instant": {
+        "hf_auto_download": False,
+        "preload_url_model": False,
+        "use_quantized_text_models": False,
+        "enable_url_model": False,
+        "enable_ocr_model": False,
+        "enable_image_model": False,
+        "enable_ocr_extraction": True,
+    },
+    "lightweight": {
+        "hf_auto_download": True,
+        "preload_url_model": True,
+        "use_quantized_text_models": False,
+        "enable_url_model": True,
+        "enable_ocr_model": False,
+        "enable_image_model": False,
+        "enable_ocr_extraction": True,
+    },
+    "balanced": {
+        "hf_auto_download": True,
+        "preload_url_model": True,
+        "use_quantized_text_models": False,
+        "enable_url_model": True,
+        "enable_ocr_model": True,
+        "enable_image_model": False,
+        "enable_ocr_extraction": True,
+    },
+    "full": {
+        "hf_auto_download": True,
+        "preload_url_model": True,
+        "use_quantized_text_models": False,
+        "enable_url_model": True,
+        "enable_ocr_model": True,
+        "enable_image_model": True,
+        "enable_ocr_extraction": True,
+    },
+}[RUNTIME_PROFILE]
+
+HF_AUTO_DOWNLOAD = _env_flag("HF_AUTO_DOWNLOAD", PROFILE_DEFAULTS["hf_auto_download"])
+PRELOAD_URL_MODEL = _env_flag("PRELOAD_URL_MODEL", PROFILE_DEFAULTS["preload_url_model"])
+USE_QUANTIZED_TEXT_MODELS = _env_flag("USE_QUANTIZED_TEXT_MODELS", PROFILE_DEFAULTS["use_quantized_text_models"])
+ENABLE_URL_MODEL = _env_flag("ENABLE_URL_MODEL", PROFILE_DEFAULTS["enable_url_model"])
+ENABLE_OCR_MODEL = _env_flag("ENABLE_OCR_MODEL", PROFILE_DEFAULTS["enable_ocr_model"])
+ENABLE_IMAGE_MODEL = _env_flag("ENABLE_IMAGE_MODEL", PROFILE_DEFAULTS["enable_image_model"])
+ENABLE_OCR_EXTRACTION = _env_flag("ENABLE_OCR_EXTRACTION", PROFILE_DEFAULTS["enable_ocr_extraction"])
+
+SUSPICIOUS_TEXT_TERMS = (
+    "login",
+    "sign in",
+    "verify",
+    "verification",
+    "password",
+    "account",
+    "confirm",
+    "security alert",
+    "suspended",
+    "unusual activity",
+    "bank",
+    "wallet",
+    "gift card",
+    "crypto",
+    "limited time",
+    "urgent",
+    "immediately",
+    "click below",
+    "reset your password",
+    "microsoft 365",
+    "outlook",
+    "paypal",
+)
+
 
 class ServiceConfigurationError(RuntimeError):
     """Raised when required runtime assets are unavailable."""
@@ -110,6 +200,13 @@ _url_bundle_cache: Any | None = None
 _ocr_bundle_cache: Any | None = None
 _image_transform_cache: Any | None = None
 _image_bundle_cache: Any | None = None
+
+
+def _dependency_error(feature_name: str, package_name: str) -> ServiceConfigurationError:
+    return ServiceConfigurationError(
+        f"{feature_name} requires the optional `{package_name}` package, which is not installed "
+        f"for the current runtime profile `{RUNTIME_PROFILE}`."
+    )
 
 
 @dataclass(frozen=True)
@@ -179,7 +276,10 @@ class _LoggingTqdm(hf_tqdm):
 
 
 def get_device() -> torch.device:
-    import torch
+    try:
+        import torch
+    except ImportError as exc:
+        raise _dependency_error("Model inference", "torch") from exc
 
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -190,29 +290,43 @@ def _download_from_hugging_face(target_path: Path) -> Path:
 
     if not HF_MODEL_REPO_ID:
         raise ServiceConfigurationError(
-            "Missing model checkpoint and no Hugging Face repo is configured. "
-            f"Either add `{target_path.name}` to `models/` or set `HF_MODEL_REPO_ID`."
+            f"Missing Hugging Face repo for `{target_path.name}`"
         )
 
     try:
         _emit_runtime_log(
-            f"Starting Hugging Face model download for `{target_path.name}` from `{HF_MODEL_REPO_ID}`."
+            f"Downloading `{target_path.name}` from `{HF_MODEL_REPO_ID}`..."
         )
+
         downloaded_path = hf_hub_download(
             repo_id=HF_MODEL_REPO_ID,
             filename=target_path.name,
             revision=HF_MODEL_REVISION,
             token=HF_MODEL_TOKEN,
             cache_dir=HF_CACHE_DIR,
-            tqdm_class=_LoggingTqdm,
+            local_files_only=False,
+            force_download=True,
         )
+
     except Exception as exc:
         raise ServiceConfigurationError(
-            f"Failed to download `{target_path.name}` from Hugging Face repo "
-            f"`{HF_MODEL_REPO_ID}`. Check the repo contents and any required token."
+            f"""
+❌ Failed to download `{target_path.name}` from Hugging Face.
+
+Repo: {HF_MODEL_REPO_ID}
+
+Possible causes:
+- File name mismatch
+- Private repo without HF_TOKEN
+- Network timeout on Streamlit
+- Corrupted upload
+
+Actual error:
+{str(exc)}
+"""
         ) from exc
 
-    _emit_runtime_log(f"Finished Hugging Face model download for `{target_path.name}`.")
+    _emit_runtime_log(f"✅ Downloaded `{target_path.name}` successfully.")
     return Path(downloaded_path)
 
 
@@ -227,14 +341,38 @@ def _ensure_model_file(target_path: Path) -> Path:
     return _download_from_hugging_face(target_path)
 
 
+def _quantized_text_path(checkpoint_path: Path) -> Path | None:
+    if checkpoint_path == TEXT_MODEL_PATH:
+        return TEXT_MODEL_QUANTIZED_PATH
+    if checkpoint_path == OCR_MODEL_PATH:
+        return OCR_MODEL_QUANTIZED_PATH
+    return None
+
+
+def _resolve_text_checkpoint_path(checkpoint_path: Path, device: "torch.device") -> tuple[Path, bool]:
+    quantized_path = _quantized_text_path(checkpoint_path)
+    if (
+        USE_QUANTIZED_TEXT_MODELS
+        and device.type == "cpu"
+        and quantized_path is not None
+    ):
+        return _ensure_model_file(quantized_path), True
+
+    return _ensure_model_file(checkpoint_path), False
+
+
 def _load_text_checkpoint(
     model: "TextPhishingModel",
     checkpoint_path: Path,
     device: "torch.device",
-) -> int:
-    import torch
+) -> tuple["TextPhishingModel", int]:
+    try:
+        import torch
+        import torch.nn as nn
+    except ImportError as exc:
+        raise _dependency_error("Text model loading", "torch") from exc
 
-    checkpoint_path = _ensure_model_file(checkpoint_path)
+    checkpoint_path, is_quantized = _resolve_text_checkpoint_path(checkpoint_path, device)
 
     checkpoint = torch.load(checkpoint_path, map_location=device)
     max_len = 128
@@ -242,13 +380,42 @@ def _load_text_checkpoint(
     if isinstance(checkpoint, dict) and "max_len" in checkpoint:
         max_len = int(checkpoint["max_len"])
 
+    if is_quantized:
+        model = torch.quantization.quantize_dynamic(model.cpu(), {nn.Linear}, dtype=torch.qint8)
+        device = torch.device("cpu")
+
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
         model.load_state_dict(checkpoint["model_state_dict"])
     else:
         model.bert.load_state_dict(checkpoint)
 
+    model.to(device)
     model.eval()
-    return max_len
+    if is_quantized:
+        _emit_runtime_log(f"Loaded quantized CPU text model `{checkpoint_path.name}`.")
+    return model, max_len
+
+
+def get_runtime_profile() -> dict[str, Any]:
+    active_branches: list[str] = ["url model" if ENABLE_URL_MODEL else "url heuristic"]
+    if ENABLE_IMAGE_MODEL:
+        active_branches.append("image cnn")
+    elif ENABLE_OCR_EXTRACTION:
+        active_branches.append("image heuristic")
+    if ENABLE_OCR_EXTRACTION:
+        active_branches.append("ocr extraction")
+    if ENABLE_OCR_MODEL:
+        active_branches.append("ocr text model")
+    elif ENABLE_OCR_EXTRACTION:
+        active_branches.append("ocr heuristic")
+
+    return {
+        "name": RUNTIME_PROFILE,
+        "uses_quantized_text_models": USE_QUANTIZED_TEXT_MODELS,
+        "active_branches": active_branches,
+        "heavy_models_enabled": ENABLE_IMAGE_MODEL or ENABLE_OCR_MODEL,
+        "downloads_enabled": HF_AUTO_DOWNLOAD,
+    }
 
 
 def get_distilbert_tokenizer() -> "AutoTokenizer":
@@ -261,7 +428,10 @@ def get_distilbert_tokenizer() -> "AutoTokenizer":
         if _tokenizer_cache is not None:
             return _tokenizer_cache
 
-        from transformers import AutoTokenizer
+        try:
+            from transformers import AutoTokenizer
+        except ImportError as exc:
+            raise _dependency_error("Tokenizer loading", "transformers") from exc
 
         try:
             _tokenizer_cache = AutoTokenizer.from_pretrained(HF_TOKENIZER_DIR, local_files_only=True)
@@ -300,6 +470,9 @@ def get_distilbert_tokenizer() -> "AutoTokenizer":
 def get_url_bundle() -> tuple["TextPhishingModel", "AutoTokenizer", int, "torch.device"]:
     global _url_bundle_cache
 
+    if not ENABLE_URL_MODEL:
+        raise ServiceConfigurationError("URL model is disabled by runtime profile.")
+
     if _url_bundle_cache is not None:
         return _url_bundle_cache
 
@@ -309,17 +482,24 @@ def get_url_bundle() -> tuple["TextPhishingModel", "AutoTokenizer", int, "torch.
 
         tokenizer = get_distilbert_tokenizer()
 
-        from src.text_model import TextPhishingModel
+        try:
+            from src.text_model import TextPhishingModel
+        except ImportError as exc:
+            missing_package = "transformers" if "transformers" in str(exc) else "torch"
+            raise _dependency_error("URL model", missing_package) from exc
 
         device = get_device()
         model = TextPhishingModel().to(device)
-        max_len = _load_text_checkpoint(model, TEXT_MODEL_PATH, device)
+        model, max_len = _load_text_checkpoint(model, TEXT_MODEL_PATH, device)
         _url_bundle_cache = (model, tokenizer, max_len, device)
         return _url_bundle_cache
 
 
 def get_ocr_bundle() -> tuple["TextPhishingModel", "AutoTokenizer", int, "torch.device"]:
     global _ocr_bundle_cache
+
+    if not ENABLE_OCR_MODEL:
+        raise ServiceConfigurationError("OCR text model is disabled by runtime profile.")
 
     if _ocr_bundle_cache is not None:
         return _ocr_bundle_cache
@@ -330,11 +510,15 @@ def get_ocr_bundle() -> tuple["TextPhishingModel", "AutoTokenizer", int, "torch.
 
         tokenizer = get_distilbert_tokenizer()
 
-        from src.text_model import TextPhishingModel
+        try:
+            from src.text_model import TextPhishingModel
+        except ImportError as exc:
+            missing_package = "transformers" if "transformers" in str(exc) else "torch"
+            raise _dependency_error("OCR text model", missing_package) from exc
 
         device = get_device()
         model = TextPhishingModel().to(device)
-        max_len = _load_text_checkpoint(model, OCR_MODEL_PATH, device)
+        model, max_len = _load_text_checkpoint(model, OCR_MODEL_PATH, device)
         _ocr_bundle_cache = (model, tokenizer, max_len, device)
         return _ocr_bundle_cache
 
@@ -349,7 +533,10 @@ def get_image_transform() -> Any:
         if _image_transform_cache is not None:
             return _image_transform_cache
 
-        from torchvision import transforms
+        try:
+            from torchvision import transforms
+        except ImportError as exc:
+            raise _dependency_error("Image preprocessing", "torchvision") from exc
 
         _image_transform_cache = transforms.Compose(
             [
@@ -363,6 +550,9 @@ def get_image_transform() -> Any:
 def get_image_bundle() -> tuple["ImagePhishingModel", "torch.device"]:
     global _image_bundle_cache
 
+    if not ENABLE_IMAGE_MODEL:
+        raise ServiceConfigurationError("Image model is disabled by runtime profile.")
+
     if _image_bundle_cache is not None:
         return _image_bundle_cache
 
@@ -370,9 +560,16 @@ def get_image_bundle() -> tuple["ImagePhishingModel", "torch.device"]:
         if _image_bundle_cache is not None:
             return _image_bundle_cache
 
-        import torch
+        try:
+            import torch
+        except ImportError as exc:
+            raise _dependency_error("Image model", "torch") from exc
 
-        from src.image_model import ImagePhishingModel
+        try:
+            from src.image_model import ImagePhishingModel
+        except ImportError as exc:
+            missing_package = "torchvision" if "torchvision" in str(exc) else "torch"
+            raise _dependency_error("Image model", missing_package) from exc
 
         device = get_device()
         model = ImagePhishingModel().to(device)
@@ -386,34 +583,49 @@ def get_image_bundle() -> tuple["ImagePhishingModel", "torch.device"]:
 def get_runtime_diagnostics() -> list[str]:
     issues: list[str] = []
 
-    for required_path in (TEXT_MODEL_PATH, OCR_MODEL_PATH, IMAGE_MODEL_PATH):
+    required_paths: list[Path] = []
+    if ENABLE_URL_MODEL:
+        required_paths.append(TEXT_MODEL_QUANTIZED_PATH if USE_QUANTIZED_TEXT_MODELS else TEXT_MODEL_PATH)
+    if ENABLE_OCR_MODEL:
+        required_paths.append(OCR_MODEL_QUANTIZED_PATH if USE_QUANTIZED_TEXT_MODELS else OCR_MODEL_PATH)
+    if ENABLE_IMAGE_MODEL:
+        required_paths.append(IMAGE_MODEL_PATH)
+
+    for required_path in required_paths:
         if not required_path.exists() and (not HF_MODEL_REPO_ID or not HF_AUTO_DOWNLOAD):
             issues.append(f"Missing model checkpoint: `{required_path.relative_to(PROJECT_ROOT)}`")
     if (
         HF_AUTO_DOWNLOAD
         and HF_MODEL_REPO_ID
-        and not all(path.exists() for path in (TEXT_MODEL_PATH, OCR_MODEL_PATH, IMAGE_MODEL_PATH))
+        and required_paths
+        and not all(path.exists() for path in required_paths)
     ):
         issues.append(
-            "Model checkpoints are not stored locally yet. They will be downloaded from "
+            "Enabled model checkpoints are not stored locally yet. They will be downloaded from "
             f"Hugging Face repo `{HF_MODEL_REPO_ID}` on first use."
         )
 
     missing_tokenizer_files = [
         filename for filename in HF_TOKENIZER_PATTERNS if not (HF_TOKENIZER_DIR / filename).exists()
     ]
-    if missing_tokenizer_files and not HF_AUTO_DOWNLOAD:
+    if missing_tokenizer_files and ENABLE_URL_MODEL and not HF_AUTO_DOWNLOAD:
         issues.append(
             "DistilBERT tokenizer files are missing locally. URL predictions will use the "
             "fast heuristic fallback until the tokenizer is added."
         )
-    elif missing_tokenizer_files and HF_AUTO_DOWNLOAD:
+    elif missing_tokenizer_files and ENABLE_URL_MODEL and HF_AUTO_DOWNLOAD:
         issues.append(
             "DistilBERT tokenizer files are missing locally. They will be downloaded from "
             f"Hugging Face repo `{HF_TOKENIZER_REPO_ID}` on first text prediction."
         )
 
-    if shutil.which("tesseract") is None:
+    if not ENABLE_URL_MODEL:
+        issues.append("Instant mode disables the URL transformer checkpoint; URLs are scored heuristically.")
+    if not ENABLE_IMAGE_MODEL:
+        issues.append("Lightweight mode disables the CNN image checkpoint; screenshots use OCR-assisted heuristics.")
+    if ENABLE_OCR_EXTRACTION and not ENABLE_OCR_MODEL:
+        issues.append("Lightweight mode disables the OCR text checkpoint; extracted text is scored heuristically.")
+    if ENABLE_OCR_EXTRACTION and shutil.which("tesseract") is None:
         issues.append(
             "Tesseract binary not found. Add `tesseract-ocr` to `packages.txt` or install it locally."
         )
@@ -442,7 +654,7 @@ def _warm_url_model() -> None:
 def start_background_warmup() -> None:
     global _warmup_thread
 
-    if not PRELOAD_URL_MODEL:
+    if not PRELOAD_URL_MODEL or not ENABLE_URL_MODEL:
         return
 
     with _warmup_lock:
@@ -486,7 +698,10 @@ def _resolve_branches() -> tuple[BranchConfig, ...]:
 
 
 def _predict_text_probability(text: str, bundle_loader: Any) -> float:
-    import torch
+    try:
+        import torch
+    except ImportError as exc:
+        raise _dependency_error("Text scoring", "torch") from exc
 
     cleaned = text.strip() or "[NO_TEXT]"
     model, tokenizer, max_len, device = bundle_loader()
@@ -505,10 +720,59 @@ def _predict_text_probability(text: str, bundle_loader: Any) -> float:
         return float(torch.sigmoid(logits)[0].cpu())
 
 
+def heuristic_text_risk(text: str, source: str = "text") -> float:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip()).lower()
+    if not cleaned:
+        return 0.0
+
+    score = 0.05
+    matches = sum(term in cleaned for term in SUSPICIOUS_TEXT_TERMS)
+    score += min(matches * 0.08, 0.40)
+
+    if "http://" in cleaned or "https://" in cleaned:
+        score += 0.08
+    if re.search(r"(?:\d{1,3}\.){3}\d{1,3}", cleaned):
+        score += 0.12
+    if any(token in cleaned for token in ("bit.ly", "tinyurl", "t.co", "rb.gy")):
+        score += 0.18
+    if any(token in cleaned for token in ("otp", "one time password", "gift card", "seed phrase")):
+        score += 0.18
+    if source == "ocr":
+        if len(cleaned) > 200:
+            score += 0.05
+        if any(token in cleaned for token in ("sign in", "log in", "keep me signed in")):
+            score += 0.10
+
+    return max(0.0, min(score, 0.98))
+
+
+def heuristic_image_risk(image_bytes: bytes, ocr_text: str | None = None) -> float:
+    import numpy as np
+    from PIL import Image
+
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    width, height = image.size
+    grayscale = np.asarray(image.convert("L"), dtype=np.float32)
+    contrast = float(grayscale.std())
+
+    score = 0.12
+    if width >= 1000 and height >= 500:
+        score += 0.05
+    if contrast < 28:
+        score += 0.06
+    if ocr_text:
+        score = max(score, 0.20 + (0.80 * heuristic_text_risk(ocr_text, source="ocr")))
+
+    return max(0.0, min(score, 0.98))
+
+
 def predict_url_probability(url: str) -> float:
     normalized_url = normalize_url(url)
     prepared_url = prepare_text_for_model(normalized_url, "urls_phase1_csv")
     heuristic_probability = heuristic_url_risk(normalized_url)
+
+    if not ENABLE_URL_MODEL:
+        return heuristic_probability
 
     try:
         model_probability = _predict_text_probability(prepared_url, get_url_bundle)
@@ -527,6 +791,9 @@ def extract_ocr_text_from_bytes(image_bytes: bytes) -> str:
     import pytesseract
     from PIL import Image
 
+    if not ENABLE_OCR_EXTRACTION:
+        return ""
+
     from src.ocr_extractor import preprocess_image
 
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -536,7 +803,17 @@ def extract_ocr_text_from_bytes(image_bytes: bytes) -> str:
 
 
 def predict_ocr_probability(text: str) -> float:
-    return _predict_text_probability(text, get_ocr_bundle)
+    heuristic_probability = heuristic_text_risk(text, source="ocr")
+    if not ENABLE_OCR_MODEL:
+        return heuristic_probability
+
+    try:
+        model_probability = _predict_text_probability(text, get_ocr_bundle)
+    except ServiceConfigurationError as exc:
+        _emit_runtime_log(f"Using OCR heuristic fallback: {exc}")
+        return heuristic_probability
+
+    return (0.65 * model_probability) + (0.35 * heuristic_probability)
 
 
 def try_predict_ocr_probability(text: str) -> float | None:
@@ -547,17 +824,31 @@ def try_predict_ocr_probability(text: str) -> float | None:
         return None
 
 
-def predict_image_probability(image_bytes: bytes) -> float:
-    import torch
+def predict_image_probability(image_bytes: bytes, ocr_text: str | None = None) -> float:
+    try:
+        import torch
+    except ImportError as exc:
+        raise _dependency_error("Image scoring", "torch") from exc
     from PIL import Image
 
-    model, device = get_image_bundle()
+    heuristic_probability = heuristic_image_risk(image_bytes, ocr_text=ocr_text)
+
+    if not ENABLE_IMAGE_MODEL:
+        return heuristic_probability
+
+    try:
+        model, device = get_image_bundle()
+    except ServiceConfigurationError as exc:
+        _emit_runtime_log(f"Using image heuristic fallback: {exc}")
+        return heuristic_probability
+
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
     tensor = get_image_transform()(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
         logits = model(tensor).view(-1)
-        return float(torch.sigmoid(logits)[0].cpu())
+        model_probability = float(torch.sigmoid(logits)[0].cpu())
+        return (0.70 * model_probability) + (0.30 * heuristic_probability)
 
 
 def _decision_threshold(name: str, fallback: float = 0.60) -> float:
@@ -663,8 +954,8 @@ def _weighted_fusion(
 
 def predict_phishing(url: str | None = None, image_bytes: bytes | None = None) -> PredictionResult:
     url_probability = predict_url_probability(url) if url else None
-    image_probability = predict_image_probability(image_bytes) if image_bytes else None
     ocr_text = extract_ocr_text_from_bytes(image_bytes) if image_bytes else None
+    image_probability = predict_image_probability(image_bytes, ocr_text=ocr_text) if image_bytes else None
     ocr_probability = try_predict_ocr_probability(ocr_text) if ocr_text is not None else None
 
     final_probability = _weighted_fusion(url_probability, image_probability, ocr_probability)
@@ -686,7 +977,12 @@ def predict_phishing(url: str | None = None, image_bytes: bytes | None = None) -
             final_probability = 1.0
             break
     else:
-        if len(available_scores) == 1:
+        # OCR often captures phishing intent directly from call-to-action text.
+        # If OCR branch crosses its decision threshold, let it drive final verdict.
+        if ocr_probability is not None and ocr_probability >= _decision_threshold("ocr"):
+            prediction = "Phishing"
+            final_probability = max(final_probability, ocr_probability)
+        elif len(available_scores) == 1:
             branch_name, score = next(iter(available_scores.items()))
             threshold = _decision_threshold(branch_name)
             prediction = "Phishing" if score >= threshold else "Legitimate"
