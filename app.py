@@ -63,7 +63,6 @@ st.caption(
 if diagnostics:
     issue_keywords = ("Missing model checkpoint", "not found", "requires the optional")
     actionable_issues = [issue for issue in diagnostics if any(keyword in issue for keyword in issue_keywords)]
-    informational_notes = [issue for issue in diagnostics if issue not in actionable_issues]
 
     if actionable_issues:
         st.warning(
@@ -72,9 +71,6 @@ if diagnostics:
         )
         for issue in actionable_issues:
             st.caption(f"- {issue}")
-
-    for issue in informational_notes:
-        st.info(issue)
 
 with st.form("prediction_form", clear_on_submit=False):
     url = st.text_input("URL", placeholder="https://example.com/login")
