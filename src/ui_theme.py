@@ -267,12 +267,21 @@ def render_sidebar(active: str) -> None:
             """,
             unsafe_allow_html=True,
         )
-        st.page_link("app.py", label="Analysis", icon=":material/radar:", disabled=active == "analysis")
-        st.page_link(
-            "pages/1_Audit_Logs.py",
-            label="Audit Logs",
+        if st.button(
+            "Analysis",
+            icon=":material/radar:",
+            use_container_width=True,
+            disabled=active == "analysis",
+            key="sidebar-analysis",
+        ):
+            st.switch_page("app.py")
+        if st.button(
+            "Audit Logs",
             icon=":material/list_alt:",
+            use_container_width=True,
             disabled=active == "logs",
-        )
+            key="sidebar-logs",
+        ):
+            st.switch_page("pages/1_Audit_Logs.py")
         st.markdown("---")
         st.caption("Model-backed phishing analysis with persistent audit history.")
