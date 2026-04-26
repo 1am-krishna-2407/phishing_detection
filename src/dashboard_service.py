@@ -18,7 +18,7 @@ import pandas as pd
 
 # Disable hf_transfer/Xet-backed downloads so the app uses the standard
 # Hugging Face client path, which is more reliable in constrained runtimes.
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
 
@@ -79,7 +79,7 @@ HF_MODEL_REVISION = os.getenv("HF_MODEL_REVISION", "").strip() or None
 HF_CACHE_DIR = os.getenv("HF_HOME", "").strip() or os.getenv("HUGGINGFACE_HUB_CACHE", "").strip() or None
 HF_TOKENIZER_REPO_ID = os.getenv("HF_TOKENIZER_REPO_ID", "distilbert-base-uncased").strip()
 HF_TOKENIZER_REVISION = os.getenv("HF_TOKENIZER_REVISION", "").strip() or None
-HF_TOKENIZER_DIR = PROJECT_ROOT/ "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
+HF_TOKENIZER_DIR = MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
 HF_TOKENIZER_PATTERNS = (
     "tokenizer.json",
     "tokenizer_config.json",
