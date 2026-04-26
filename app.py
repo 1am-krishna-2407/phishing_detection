@@ -10,6 +10,7 @@ from src.dashboard_service import (
     ServiceConfigurationError,
     append_url_log,
     delete_url_log_entry,
+    get_branch_availability,
     get_runtime_diagnostics,
     get_runtime_profile,
     predict_phishing,
@@ -52,6 +53,7 @@ def _load_logs() -> pd.DataFrame:
 start_background_warmup()
 diagnostics = get_runtime_diagnostics()
 runtime_profile = get_runtime_profile()
+branch_availability = get_branch_availability()
 
 st.markdown(
     f"""
@@ -119,6 +121,9 @@ with right_col:
     stat_a, stat_b = st.columns(2)
     stat_a.metric("URL Branch", "Model" if "url model" in runtime_profile["active_branches"] else "Offline")
     stat_b.metric("Heavy Models", "On" if runtime_profile["heavy_models_enabled"] else "Off")
+    st.markdown("Branch readiness")
+    for branch in branch_availability:
+        st.caption(f"- {branch.branch}: {branch.status} — {branch.detail}")
     preview_logs = _load_logs()
     st.markdown('<div class="preview-card">', unsafe_allow_html=True)
     st.markdown("Recent cases")
