@@ -79,7 +79,7 @@ HF_MODEL_REVISION = os.getenv("HF_MODEL_REVISION", "").strip() or None
 HF_CACHE_DIR = os.getenv("HF_HOME", "").strip() or os.getenv("HUGGINGFACE_HUB_CACHE", "").strip() or None
 HF_TOKENIZER_REPO_ID = os.getenv("HF_TOKENIZER_REPO_ID", "distilbert-base-uncased").strip()
 HF_TOKENIZER_REVISION = os.getenv("HF_TOKENIZER_REVISION", "").strip() or None
-HF_TOKENIZER_DIR = MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
+HF_TOKENIZER_DIR = PROJECT_ROOT/ "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
 HF_TOKENIZER_PATTERNS = (
     "tokenizer.json",
     "tokenizer_config.json",
