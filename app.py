@@ -49,6 +49,15 @@ def _load_logs() -> list[dict[str, object]]:
     return read_url_logs(limit=6)
 
 
+def _logs_for_display() -> object:
+    rows = _load_logs()
+    try:
+        import pandas as pd
+    except ImportError:
+        return rows
+    return pd.DataFrame(rows)
+
+
 start_background_warmup()
 diagnostics = get_runtime_diagnostics()
 runtime_profile = get_runtime_profile()
@@ -233,6 +242,6 @@ with result_right:
                     label_visibility="collapsed",
                 )
             with tabs[1]:
-                st.dataframe(_load_logs(), width="stretch", hide_index=True)
+                st.dataframe(_logs_for_display(), width="stretch", hide_index=True)
         else:
-            st.dataframe(_load_logs(), width="stretch", hide_index=True)
+            st.dataframe(_logs_for_display(), width="stretch", hide_index=True)
