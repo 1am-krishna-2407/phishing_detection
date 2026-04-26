@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import csv
@@ -12,6 +11,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import re
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -285,6 +285,20 @@ class BranchAvailability:
     branch: str
     status: str
     detail: str
+
+
+class LogRows(list[dict[str, Any]]):
+    @property
+    def empty(self) -> bool:
+        return len(self) == 0
+
+    def head(self, n: int) -> "LogRows":
+        return LogRows(self[:n])
+
+    def itertuples(self, index: bool = False):
+        del index
+        for row in self:
+            yield SimpleNamespace(**row)
 
 
 DEFAULT_BRANCHES: tuple[BranchConfig, ...] = (
@@ -1280,13 +1294,13 @@ def delete_url_log_entry(row_id: int) -> bool:
     return True
 
 
-def read_url_logs(limit: int = 50) -> list[dict[str, Any]]:
+def read_url_logs(limit: int = 50) -> LogRows:
     if not URL_LOG_PATH.exists():
-        return []
+        return LogRows()
 
     with open(URL_LOG_PATH, "r", newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
-        rows = []
+        rows: LogRows = LogRows()
         for index, raw_row in enumerate(reader):
             rows.append(
                 {
@@ -1303,4 +1317,4 @@ def read_url_logs(limit: int = 50) -> list[dict[str, Any]]:
                 }
             )
 
-    return list(reversed(rows[-limit:]))
+    return LogRows(reversed(rows[-limit:]))
