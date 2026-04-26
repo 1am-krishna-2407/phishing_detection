@@ -11,9 +11,10 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import re
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+import pandas as pd
 
 # Disable hf_transfer/Xet-backed downloads so the app uses the standard
 # Hugging Face client path, which is more reliable in constrained runtimes.
@@ -108,8 +109,6 @@ LOG_COLUMNS = [
     "ocr_text_excerpt",
     "image_name",
 ]
-
-LOG_ROW_KEYS = ["row_id", *LOG_COLUMNS]
 
 TRUSTED_DOMAINS = {
     "google.com",
@@ -285,20 +284,6 @@ class BranchAvailability:
     branch: str
     status: str
     detail: str
-
-
-class LogRows(list[dict[str, Any]]):
-    @property
-    def empty(self) -> bool:
-        return len(self) == 0
-
-    def head(self, n: int) -> "LogRows":
-        return LogRows(self[:n])
-
-    def itertuples(self, index: bool = False):
-        del index
-        for row in self:
-            yield SimpleNamespace(**row)
 
 
 DEFAULT_BRANCHES: tuple[BranchConfig, ...] = (
@@ -1277,44 +1262,31 @@ def delete_url_log_entry(row_id: int) -> bool:
     if not URL_LOG_PATH.exists():
         return False
 
-    rows = read_url_logs(limit=10_000_000)
-    if row_id < 0 or row_id >= len(rows):
+    frame = pd.read_csv(URL_LOG_PATH)
+    if row_id < 0 or row_id >= len(frame):
         return False
 
-    remaining_rows = [row for row in rows if int(row["row_id"]) != row_id]
-    if not remaining_rows:
+    frame = frame.drop(index=row_id).reset_index(drop=True)
+    if frame.empty:
         URL_LOG_PATH.unlink(missing_ok=True)
         return True
 
-    with open(URL_LOG_PATH, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=LOG_COLUMNS)
-        writer.writeheader()
-        for row in remaining_rows:
-            writer.writerow({column: row.get(column, "") for column in LOG_COLUMNS})
+    frame.to_csv(URL_LOG_PATH, index=False)
     return True
 
 
-def read_url_logs(limit: int = 50) -> LogRows:
+def read_url_logs(limit: int = 50) -> pd.DataFrame:
     if not URL_LOG_PATH.exists():
-        return LogRows()
+        return pd.DataFrame(columns=["row_id", *LOG_COLUMNS])
 
-    with open(URL_LOG_PATH, "r", newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        rows: LogRows = LogRows()
-        for index, raw_row in enumerate(reader):
-            rows.append(
-                {
-                    "row_id": index,
-                    "timestamp_utc": raw_row.get("timestamp_utc", ""),
-                    "url": raw_row.get("url", ""),
-                    "prediction": raw_row.get("prediction", ""),
-                    "phishing_probability": _parse_optional_float(raw_row.get("phishing_probability")),
-                    "url_probability": _parse_optional_float(raw_row.get("url_probability")),
-                    "image_probability": _parse_optional_float(raw_row.get("image_probability")),
-                    "ocr_probability": _parse_optional_float(raw_row.get("ocr_probability")),
-                    "ocr_text_excerpt": raw_row.get("ocr_text_excerpt", ""),
-                    "image_name": raw_row.get("image_name", ""),
-                }
-            )
-
-    return LogRows(reversed(rows[-limit:]))
+    frame = pd.read_csv(URL_LOG_PATH)
+    numeric_columns = [
+        "phishing_probability",
+        "url_probability",
+        "image_probability",
+        "ocr_probability",
+    ]
+    for column in numeric_columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    frame = frame.reset_index(names="row_id")
+    return frame.tail(limit).iloc[::-1].reset_index(drop=True)
