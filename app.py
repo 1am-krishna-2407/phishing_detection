@@ -47,7 +47,10 @@ def _status_class(prediction: str) -> str:
 
 
 def _load_logs() -> pd.DataFrame:
-    return read_url_logs(limit=6)
+    try:
+        return read_url_logs(limit=6)
+    except Exception:
+        return pd.DataFrame(columns=["row_id", "timestamp_utc", "url", "prediction", "phishing_probability"])
 
 
 start_background_warmup()
