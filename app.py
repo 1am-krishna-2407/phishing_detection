@@ -12,8 +12,6 @@ from src.dashboard_service import (
     delete_url_log_entry,
     get_runtime_diagnostics,
     get_runtime_profile,
-    get_warmup_status,
-    is_url_model_ready,
     predict_phishing,
     read_url_logs,
     start_background_warmup,
@@ -47,13 +45,6 @@ st.title("Phishing Detection Dashboard")
 st.caption("Check pasted URLs and uploaded screenshots, then keep a history of URL prediction results.")
 
 start_background_warmup()
-warmup_status = get_warmup_status()
-if warmup_status["state"] == "running":
-    st.info("Preparing the URL model in the background. The app is usable while it warms up.")
-elif warmup_status["state"] == "error" and not is_url_model_ready():
-    st.warning(
-        "The hosted URL model could not be prepared yet. URL checks will fail until the model assets are ready."
-    )
 
 diagnostics = get_runtime_diagnostics()
 runtime_profile = get_runtime_profile()
