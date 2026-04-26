@@ -18,7 +18,7 @@ import pandas as pd
 
 # Disable hf_transfer/Xet-backed downloads so the app uses the standard
 # Hugging Face client path, which is more reliable in constrained runtimes.
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
 
