@@ -267,21 +267,20 @@ def render_sidebar(active: str) -> None:
             """,
             unsafe_allow_html=True,
         )
-        if st.button(
-            "Analysis",
-            icon=":material/radar:",
-            use_container_width=True,
-            disabled=active == "analysis",
-            key="sidebar-analysis",
-        ):
-            st.switch_page("app.py")
-        if st.button(
-            "Audit Logs",
-            icon=":material/list_alt:",
-            use_container_width=True,
-            disabled=active == "logs",
-            key="sidebar-logs",
-        ):
-            st.switch_page("pages/1_Audit_Logs.py")
+        analysis_state = "Current view" if active == "analysis" else "Open from Pages menu"
+        logs_state = "Current view" if active == "logs" else "Open from Pages menu"
+        st.markdown(
+            f"""
+            <div class="preview-card" style="margin-bottom:0.7rem;">
+              <div style="font-weight:700;">Analysis</div>
+              <div style="color:var(--muted);font-size:0.84rem;">{analysis_state}</div>
+            </div>
+            <div class="preview-card" style="margin-bottom:0.7rem;">
+              <div style="font-weight:700;">Audit Logs</div>
+              <div style="color:var(--muted);font-size:0.84rem;">{logs_state}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
         st.caption("Model-backed phishing analysis with persistent audit history.")
