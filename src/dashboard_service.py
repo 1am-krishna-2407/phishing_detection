@@ -22,9 +22,18 @@ os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
 
-from huggingface_hub import HfApi, hf_hub_download
-from huggingface_hub.utils import tqdm as hf_tqdm
 from src.text_data_utils import prepare_text_for_model
+
+try:
+    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub.utils import tqdm as hf_tqdm
+except ImportError as exc:
+    HfApi = None
+    hf_hub_download = None
+    hf_tqdm = None
+    _HUGGINGFACE_IMPORT_ERROR: ImportError | None = exc
+else:
+    _HUGGINGFACE_IMPORT_ERROR = None
 
 if TYPE_CHECKING:
     import torch
@@ -242,6 +251,11 @@ def _dependency_error(feature_name: str, package_name: str) -> ServiceConfigurat
     )
 
 
+def _ensure_huggingface_hub(feature_name: str) -> None:
+    if _HUGGINGFACE_IMPORT_ERROR is not None:
+        raise _dependency_error(feature_name, "huggingface_hub") from _HUGGINGFACE_IMPORT_ERROR
+
+
 @dataclass(frozen=True)
 class PredictionResult:
     prediction: str
@@ -321,12 +335,15 @@ def _copy_download_to_target(downloaded_path: Path, target_path: Path) -> Path:
 
 
 def _list_remote_repo_files(repo_id: str, revision: str | None) -> set[str]:
+    _ensure_huggingface_hub("Hugging Face model lookup")
     cache_key = (repo_id, revision)
     with _hf_repo_files_lock:
         cached = _hf_repo_files_cache.get(cache_key)
         if cached is not None:
             return cached
 
+    if HfApi is None:
+        raise _dependency_error("Hugging Face model lookup", "huggingface_hub")
     repo_files = set(
         HfApi(token=HF_MODEL_TOKEN).list_repo_files(
             repo_id=repo_id,
@@ -353,40 +370,41 @@ def _resolve_remote_model_filename(target_path: Path) -> str:
     )
 
 
-class _LoggingTqdm(hf_tqdm):
-    """Logs download progress to Streamlit/runtime logs every 5%."""
+if hf_tqdm is not None:
+    class _LoggingTqdm(hf_tqdm):
+        """Logs download progress to Streamlit/runtime logs every 5%."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._last_logged_percent = -5
-        self._label = self.desc or "Hugging Face download"
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._last_logged_percent = -5
+            self._label = self.desc or "Hugging Face download"
 
-    def _format_progress(self) -> str | None:
-        if not self.total:
-            return None
+        def _format_progress(self) -> str | None:
+            if not self.total:
+                return None
 
-        percent = int((self.n / self.total) * 100)
-        if percent < 100 and percent < self._last_logged_percent + 5:
-            return None
+            percent = int((self.n / self.total) * 100)
+            if percent < 100 and percent < self._last_logged_percent + 5:
+                return None
 
-        self._last_logged_percent = 100 if percent >= 100 else percent - (percent % 5)
-        downloaded_mb = self.n / (1024 * 1024)
-        total_mb = self.total / (1024 * 1024)
-        return f"{self._label}: {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)"
-
-    def update(self, n: int = 1) -> None:
-        super().update(n)
-        message = self._format_progress()
-        if message:
-            _emit_runtime_log(message)
-
-    def close(self) -> None:
-        if self.total and self.n >= self.total and self._last_logged_percent < 100:
+            self._last_logged_percent = 100 if percent >= 100 else percent - (percent % 5)
             downloaded_mb = self.n / (1024 * 1024)
             total_mb = self.total / (1024 * 1024)
-            _emit_runtime_log(f"{self._label}: 100% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
-            self._last_logged_percent = 100
-        super().close()
+            return f"{self._label}: {percent}% ({downloaded_mb:.1f}/{total_mb:.1f} MB)"
+
+        def update(self, n: int = 1) -> None:
+            super().update(n)
+            message = self._format_progress()
+            if message:
+                _emit_runtime_log(message)
+
+        def close(self) -> None:
+            if self.total and self.n >= self.total and self._last_logged_percent < 100:
+                downloaded_mb = self.n / (1024 * 1024)
+                total_mb = self.total / (1024 * 1024)
+                _emit_runtime_log(f"{self._label}: 100% ({downloaded_mb:.1f}/{total_mb:.1f} MB)")
+                self._last_logged_percent = 100
+            super().close()
 
 
 def get_device() -> torch.device:
@@ -402,6 +420,7 @@ def _download_from_hugging_face(target_path: Path) -> Path:
     if target_path.exists():
         return target_path
 
+    _ensure_huggingface_hub("Hugging Face model download")
     if not HF_MODEL_REPO_ID:
         raise ServiceConfigurationError(
             f"Missing Hugging Face repo for `{target_path.name}`"
@@ -412,6 +431,9 @@ def _download_from_hugging_face(target_path: Path) -> Path:
         _emit_runtime_log(
             f"Downloading `{remote_filename}` from `{HF_MODEL_REPO_ID}` for `{target_path.name}`..."
         )
+
+        if hf_hub_download is None:
+            raise _dependency_error("Hugging Face model download", "huggingface_hub")
 
         downloaded_path = hf_hub_download(
             repo_id=HF_MODEL_REPO_ID,
@@ -564,6 +586,9 @@ def get_distilbert_tokenizer() -> "AutoTokenizer":
                 f"Starting Hugging Face tokenizer download for `{HF_TOKENIZER_REPO_ID}`."
             )
             try:
+                _ensure_huggingface_hub("Tokenizer download")
+                if hf_hub_download is None:
+                    raise _dependency_error("Tokenizer download", "huggingface_hub")
                 HF_TOKENIZER_DIR.mkdir(parents=True, exist_ok=True)
                 for filename in HF_TOKENIZER_PATTERNS:
                     downloaded_path = hf_hub_download(
@@ -737,6 +762,11 @@ def get_runtime_diagnostics() -> list[str]:
             issues.append(
                 "No Hugging Face token detected. Public model repos can still download, "
                 "but private repos require `HF_TOKEN` or an equivalent secret."
+            )
+        if _HUGGINGFACE_IMPORT_ERROR is not None:
+            issues.append(
+                "Model auto-download is enabled, but the `huggingface_hub` package is not installed. "
+                "Add it to `requirements.txt` or disable auto-download."
             )
 
     missing_tokenizer_files = [
