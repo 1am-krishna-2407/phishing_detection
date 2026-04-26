@@ -13,6 +13,7 @@ from src.dashboard_service import (
     get_runtime_diagnostics,
     get_runtime_profile,
     get_warmup_status,
+    is_url_model_ready,
     predict_phishing,
     read_url_logs,
     start_background_warmup,
@@ -49,7 +50,7 @@ start_background_warmup()
 warmup_status = get_warmup_status()
 if warmup_status["state"] == "running":
     st.info("Preparing the URL model in the background. The app is usable while it warms up.")
-elif warmup_status["state"] == "error":
+elif warmup_status["state"] == "error" and not is_url_model_ready():
     st.warning(
         "The hosted URL model could not be prepared yet. URL checks will fail until the model assets are ready."
     )
