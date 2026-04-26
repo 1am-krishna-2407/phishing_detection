@@ -45,7 +45,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-logs = read_url_logs(limit=250)
+try:
+    logs = read_url_logs(limit=250)
+except Exception:
+    logs = pd.DataFrame(columns=["row_id", "timestamp_utc", "url", "prediction"])
 summary_a, summary_b, summary_c = st.columns(3)
 summary_a.metric("Entries", str(len(logs)))
 summary_b.metric(
