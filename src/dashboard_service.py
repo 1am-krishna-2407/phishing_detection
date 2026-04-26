@@ -74,7 +74,7 @@ OCR_MODEL_QUANTIZED_PATH = MODELS_DIR / "ocr_text_model_phase2_5_dynamic_int8.pt
 IMAGE_MODEL_PATH = MODELS_DIR / "image_model_phase2.pt"
 THRESHOLD_CONFIG_PATH = MODELS_DIR / "branch_thresholds.json"
 
-HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing_detection").strip()
+HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing-detection-models").strip()
 HF_MODEL_REVISION = os.getenv("HF_MODEL_REVISION", "").strip() or None
 HF_CACHE_DIR = os.getenv("HF_HOME", "").strip() or os.getenv("HUGGINGFACE_HUB_CACHE", "").strip() or None
 HF_TOKENIZER_REPO_ID = os.getenv("HF_TOKENIZER_REPO_ID", "distilbert-base-uncased").strip()
@@ -128,12 +128,9 @@ TRUSTED_DOMAINS = {
     "netflix.com",
 }
 
-RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "full").strip().lower() or "full"
-if RUNTIME_PROFILE == "lightweight":
-    # Lightweight mode is intentionally disabled for local runtime stability.
-    RUNTIME_PROFILE = "full"
-if RUNTIME_PROFILE not in {"instant", "balanced", "full"}:
-    RUNTIME_PROFILE = "full"
+RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "instant").strip().lower() or "instant"
+if RUNTIME_PROFILE not in {"instant", "lightweight", "balanced", "full"}:
+    RUNTIME_PROFILE = "instant"
 
 
 def _env_flag(name: str, default: bool) -> bool:
