@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 import html
 import json
 import os
 import re
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 SOURCE_PREFIX = {
@@ -46,6 +49,8 @@ def prepare_text_for_model(text: str, source: str) -> str:
 
 
 def _load_json_records(path: str, source: str) -> pd.DataFrame:
+    import pandas as pd
+
     with open(path, "r", encoding="utf-8") as handle:
         records = json.load(handle)
 
@@ -59,6 +64,8 @@ def _load_json_records(path: str, source: str) -> pd.DataFrame:
 
 
 def _load_csv_records(path: str, source: str) -> pd.DataFrame:
+    import pandas as pd
+
     frame = pd.read_csv(path)
     if "text" not in frame.columns or "label" not in frame.columns:
         raise ValueError(f"{path} must contain 'text' and 'label' columns")
@@ -72,6 +79,8 @@ def load_phase1_sources(
     processed_dir: str,
     allowed_sources: list[str] | None = None,
 ) -> pd.DataFrame:
+    import pandas as pd
+
     sources = [
         ("urls_phase1.csv", "urls_phase1_csv", _load_csv_records),
         ("urls.json", "urls_json", _load_json_records),
@@ -119,6 +128,8 @@ def build_integrated_phase1_dataset(
     random_state: int = 42,
     allowed_sources: list[str] | None = None,
 ) -> pd.DataFrame:
+    import pandas as pd
+
     frame = load_phase1_sources(processed_dir, allowed_sources=allowed_sources)
     sources = list(frame["source"].drop_duplicates())
 
