@@ -259,6 +259,13 @@ class BranchConfig:
     decision_threshold: float
 
 
+@dataclass(frozen=True)
+class BranchAvailability:
+    branch: str
+    status: str
+    detail: str
+
+
 DEFAULT_BRANCHES: tuple[BranchConfig, ...] = (
     BranchConfig(name="url", trigger_threshold=0.90, decision_threshold=0.60),
     BranchConfig(name="image", trigger_threshold=0.90, decision_threshold=0.60),
@@ -758,6 +765,72 @@ def get_runtime_diagnostics() -> list[str]:
         )
 
     return issues
+
+
+def _describe_checkpoint_availability(
+    branch: str,
+    checkpoint_path: Path,
+    enabled: bool,
+    requires_tokenizer: bool = False,
+) -> BranchAvailability:
+    if not enabled:
+        return BranchAvailability(branch=branch, status="disabled", detail="Disabled by runtime profile.")
+
+    if checkpoint_path.exists():
+        detail = f"Local checkpoint ready: `{checkpoint_path.name}`."
+        if requires_tokenizer:
+            missing_tokenizer_files = [
+                filename for filename in HF_TOKENIZER_PATTERNS if not (HF_TOKENIZER_DIR / filename).exists()
+            ]
+            if missing_tokenizer_files:
+                detail += f" Tokenizer will be fetched from `{HF_TOKENIZER_REPO_ID}` on first use."
+        return BranchAvailability(branch=branch, status="ready", detail=detail)
+
+    if not HF_AUTO_DOWNLOAD or not HF_MODEL_REPO_ID:
+        return BranchAvailability(
+            branch=branch,
+            status="missing",
+            detail=f"Checkpoint missing locally: `{checkpoint_path.name}`.",
+        )
+
+    try:
+        remote_filename = _resolve_remote_model_filename(checkpoint_path)
+    except Exception as exc:
+        return BranchAvailability(
+            branch=branch,
+            status="blocked",
+            detail=f"Unable to verify `{checkpoint_path.name}` in `{HF_MODEL_REPO_ID}`: {exc}",
+        )
+
+    return BranchAvailability(
+        branch=branch,
+        status="remote",
+        detail=f"Will load from Hugging Face repo `{HF_MODEL_REPO_ID}` as `{remote_filename}`.",
+    )
+
+
+def get_branch_availability() -> list[BranchAvailability]:
+    url_checkpoint = TEXT_MODEL_QUANTIZED_PATH if USE_QUANTIZED_TEXT_MODELS else TEXT_MODEL_PATH
+    ocr_checkpoint = OCR_MODEL_QUANTIZED_PATH if USE_QUANTIZED_TEXT_MODELS else OCR_MODEL_PATH
+
+    return [
+        _describe_checkpoint_availability(
+            branch="URL model",
+            checkpoint_path=url_checkpoint,
+            enabled=ENABLE_URL_MODEL,
+            requires_tokenizer=True,
+        ),
+        _describe_checkpoint_availability(
+            branch="OCR model",
+            checkpoint_path=ocr_checkpoint,
+            enabled=ENABLE_OCR_MODEL,
+        ),
+        _describe_checkpoint_availability(
+            branch="Image model",
+            checkpoint_path=IMAGE_MODEL_PATH,
+            enabled=ENABLE_IMAGE_MODEL,
+        ),
+    ]
 
 
 def _set_warmup_status(state: str, message: str) -> None:
