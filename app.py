@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import warnings
 
+import pandas as pd
 import streamlit as st
 
 from src.dashboard_service import (
@@ -45,17 +46,8 @@ def _status_class(prediction: str) -> str:
     return "status-bad" if prediction.lower() == "phishing" else "status-good"
 
 
-def _load_logs() -> list[dict[str, object]]:
+def _load_logs() -> pd.DataFrame:
     return read_url_logs(limit=6)
-
-
-def _logs_for_display() -> object:
-    rows = _load_logs()
-    try:
-        import pandas as pd
-    except ImportError:
-        return rows
-    return pd.DataFrame(rows)
 
 
 start_background_warmup()
@@ -135,18 +127,18 @@ with right_col:
     preview_logs = _load_logs()
     st.markdown('<div class="preview-card">', unsafe_allow_html=True)
     st.markdown("Recent cases")
-    if not preview_logs:
+    if preview_logs.empty:
         st.caption(f"No URL predictions logged yet. Entries will be saved to `{Path('logs/url_prediction_log.csv')}`.")
     else:
-        for row in preview_logs[:3]:
+        for row in preview_logs.head(3).itertuples(index=False):
             info_col, action_col = st.columns([5.0, 1.1], gap="small")
             with info_col:
                 st.markdown(
                     f"""
                     <div class="log-row">
-                      <div style="font-weight:700;">{row["url"]}</div>
+                      <div style="font-weight:700;">{row.url}</div>
                       <div style="color:var(--muted);font-size:0.88rem;">
-                        {row["prediction"]} • {_score_text(row["phishing_probability"])} • {row["timestamp_utc"]}
+                        {row.prediction} • {_score_text(row.phishing_probability)} • {row.timestamp_utc}
                       </div>
                     </div>
                     """,
@@ -154,8 +146,8 @@ with right_col:
                 )
             with action_col:
                 st.write("")
-                if st.button(":material/delete:", key=f'preview-delete-{row["row_id"]}', width="stretch"):
-                    delete_url_log_entry(int(row["row_id"]))
+                if st.button(":material/delete:", key=f"preview-delete-{row.row_id}", width="stretch"):
+                    delete_url_log_entry(int(row.row_id))
                     st.rerun()
         st.caption("Open the Audit Logs page from Streamlit's Pages menu.")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -242,6 +234,6 @@ with result_right:
                     label_visibility="collapsed",
                 )
             with tabs[1]:
-                st.dataframe(_logs_for_display(), width="stretch", hide_index=True)
+                st.dataframe(_load_logs(), width="stretch", hide_index=True)
         else:
-            st.dataframe(_logs_for_display(), width="stretch", hide_index=True)
+            st.dataframe(_load_logs(), width="stretch", hide_index=True)
