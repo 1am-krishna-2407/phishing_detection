@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import warnings
 
+import pandas as pd
 import streamlit as st
 
 from src.dashboard_service import delete_url_log_entry, read_url_logs
@@ -29,14 +30,6 @@ def _score_text(value: float | None) -> str:
     if value is None:
         return "Not provided"
     return f"{float(value) * 100:.2f}%"
-
-
-def _table_for_display(rows: list[dict[str, object]]) -> object:
-    try:
-        import pandas as pd
-    except ImportError:
-        return rows
-    return pd.DataFrame(rows)
 
 
 st.markdown(
@@ -74,7 +67,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if not logs:
+if logs.empty:
     st.info(f"No URL predictions logged yet. Entries will be saved to `{Path('logs/url_prediction_log.csv')}`.")
 else:
     filter_cols = st.columns([1.1, 1.1, 2.4])
@@ -82,51 +75,51 @@ else:
     sort_filter = filter_cols[1].selectbox("Sort", ["Newest", "Highest risk"])
     query = filter_cols[2].text_input("Search URL", placeholder="Filter by URL or image name")
 
-    filtered = list(logs)
+    filtered = logs.copy()
     if prediction_filter != "All":
-        filtered = [row for row in filtered if row["prediction"] == prediction_filter]
+        filtered = filtered[filtered["prediction"] == prediction_filter]
     if query.strip():
         needle = query.strip().lower()
-        filtered = [
-            row for row in filtered
-            if needle in (row["url"] or "").lower() or needle in (row["image_name"] or "").lower()
+        filtered = filtered[
+            filtered["url"].fillna("").str.lower().str.contains(needle)
+            | filtered["image_name"].fillna("").str.lower().str.contains(needle)
         ]
     if sort_filter == "Highest risk":
-        filtered = sorted(
-            filtered,
-            key=lambda row: row["phishing_probability"] if row["phishing_probability"] is not None else -1.0,
-            reverse=True,
-        )
+        filtered = filtered.sort_values("phishing_probability", ascending=False, na_position="last")
 
-    table = []
-    for row in filtered:
-        table.append(
-            {
-                "timestamp_utc": row["timestamp_utc"],
-                "url": row["url"],
-                "prediction": row["prediction"],
-                "phishing_probability": _score_text(row["phishing_probability"]),
-                "url_probability": _score_text(row["url_probability"]),
-                "image_probability": _score_text(row["image_probability"]),
-                "ocr_probability": _score_text(row["ocr_probability"]),
-                "image_name": row["image_name"],
-            }
-        )
-    st.dataframe(_table_for_display(table), width="stretch", hide_index=True)
+    table = filtered[
+        [
+            "timestamp_utc",
+            "url",
+            "prediction",
+            "phishing_probability",
+            "url_probability",
+            "image_probability",
+            "ocr_probability",
+            "image_name",
+        ]
+    ].copy()
+    if not table.empty:
+        for column in ("phishing_probability", "url_probability", "image_probability", "ocr_probability"):
+            table[column] = table[column].map(_score_text)
+    st.dataframe(table, width="stretch", hide_index=True)
 
     st.markdown("")
-    for row in filtered:
-        label = f'{row["url"]}  •  {row["prediction"]}  •  {_score_text(row["phishing_probability"])}'
+    for row in filtered.itertuples(index=False):
+        label = f"{row.url}  •  {row.prediction}  •  {_score_text(row.phishing_probability)}"
         with st.expander(label):
-            details = [
-                {"Field": "Timestamp", "Value": row["timestamp_utc"]},
-                {"Field": "URL Probability", "Value": _score_text(row["url_probability"])},
-                {"Field": "Image Probability", "Value": _score_text(row["image_probability"])},
-                {"Field": "OCR Probability", "Value": _score_text(row["ocr_probability"])},
-                {"Field": "Image Name", "Value": row["image_name"] or "Not provided"},
-                {"Field": "OCR Excerpt", "Value": row["ocr_text_excerpt"] or "Not provided"},
-            ]
-            st.dataframe(_table_for_display(details), width="stretch", hide_index=True)
-            if st.button("Delete entry", key=f'delete-log-{row["row_id"]}', width="stretch"):
-                delete_url_log_entry(int(row["row_id"]))
+            details = pd.DataFrame(
+                [
+                    ("Timestamp", row.timestamp_utc),
+                    ("URL Probability", _score_text(row.url_probability)),
+                    ("Image Probability", _score_text(row.image_probability)),
+                    ("OCR Probability", _score_text(row.ocr_probability)),
+                    ("Image Name", row.image_name or "Not provided"),
+                    ("OCR Excerpt", row.ocr_text_excerpt or "Not provided"),
+                ],
+                columns=["Field", "Value"],
+            )
+            st.dataframe(details, width="stretch", hide_index=True)
+            if st.button("Delete entry", key=f"delete-log-{row.row_id}", width="stretch"):
+                delete_url_log_entry(int(row.row_id))
                 st.rerun()
