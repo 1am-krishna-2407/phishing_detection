@@ -11,6 +11,7 @@ from src.dashboard_service import (
     append_url_log,
     delete_url_log_entry,
     get_runtime_diagnostics,
+    get_runtime_profile,
     get_warmup_status,
     predict_phishing,
     read_url_logs,
@@ -50,21 +51,30 @@ if warmup_status["state"] == "running":
     st.info("Preparing the URL model in the background. The app is usable while it warms up.")
 elif warmup_status["state"] == "error":
     st.warning(
-        "The hosted URL model could not be prepared yet. URL checks will use the fast fallback until assets are ready."
+        "The hosted URL model could not be prepared yet. URL checks will fail until the model assets are ready."
     )
 
 diagnostics = get_runtime_diagnostics()
+runtime_profile = get_runtime_profile()
+st.caption(
+    f"Runtime profile: `{runtime_profile['name']}`  •  Active branches: "
+    + ", ".join(runtime_profile["active_branches"])
+)
 if diagnostics:
-    download_only = all("downloaded from Hugging Face" in issue for issue in diagnostics)
-    if download_only:
-        st.info("Model files are not stored in the repo and will be downloaded from Hugging Face on first use.")
-    else:
+    issue_keywords = ("Missing model checkpoint", "not found", "requires the optional")
+    actionable_issues = [issue for issue in diagnostics if any(keyword in issue for keyword in issue_keywords)]
+    informational_notes = [issue for issue in diagnostics if issue not in actionable_issues]
+
+    if actionable_issues:
         st.warning(
-            "This deployment is missing some runtime assets. URL-only exploration may still work, "
-            "but image/OCR predictions will fail until the environment is completed."
+            "This deployment is missing some runtime assets. Predictions that depend on those "
+            "models will fail until the environment is completed."
         )
-    for issue in diagnostics:
-        st.caption(f"- {issue}")
+        for issue in actionable_issues:
+            st.caption(f"- {issue}")
+
+    for issue in informational_notes:
+        st.info(issue)
 
 with st.form("prediction_form", clear_on_submit=False):
     url = st.text_input("URL", placeholder="https://example.com/login")
