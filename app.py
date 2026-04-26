@@ -144,7 +144,13 @@ with right_col:
                 if st.button(":material/delete:", key=f"preview-delete-{row.row_id}", width="stretch"):
                     delete_url_log_entry(int(row.row_id))
                     st.rerun()
-        st.page_link("pages/1_Audit_Logs.py", label="Open full audit log", icon=":material/arrow_forward:")
+        if st.button(
+            "Open full audit log",
+            icon=":material/arrow_forward:",
+            key="open-audit-log",
+            width="stretch",
+        ):
+            st.switch_page("pages/1_Audit_Logs.py")
     st.markdown("</div>", unsafe_allow_html=True)
 
 result = None
