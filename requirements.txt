@@ -1,5 +1,6 @@
 huggingface_hub==0.30.2
 numpy==1.26.4
+pandas==2.2.3
 pillow==10.4.0
 pytesseract==0.3.13
 streamlit==1.44.0
