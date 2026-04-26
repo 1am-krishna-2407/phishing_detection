@@ -31,6 +31,14 @@ def _score_text(value: float | None) -> str:
     return f"{float(value) * 100:.2f}%"
 
 
+def _table_for_display(rows: list[dict[str, object]]) -> object:
+    try:
+        import pandas as pd
+    except ImportError:
+        return rows
+    return pd.DataFrame(rows)
+
+
 st.markdown(
     """
     <section class="app-hero">
@@ -104,7 +112,7 @@ else:
                 "image_name": row["image_name"],
             }
         )
-    st.dataframe(table, width="stretch", hide_index=True)
+    st.dataframe(_table_for_display(table), width="stretch", hide_index=True)
 
     st.markdown("")
     for row in filtered:
@@ -118,7 +126,7 @@ else:
                 {"Field": "Image Name", "Value": row["image_name"] or "Not provided"},
                 {"Field": "OCR Excerpt", "Value": row["ocr_text_excerpt"] or "Not provided"},
             ]
-            st.dataframe(details, width="stretch", hide_index=True)
+            st.dataframe(_table_for_display(details), width="stretch", hide_index=True)
             if st.button("Delete entry", key=f'delete-log-{row["row_id"]}', width="stretch"):
                 delete_url_log_entry(int(row["row_id"]))
                 st.rerun()
