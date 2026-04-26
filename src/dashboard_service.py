@@ -128,9 +128,9 @@ TRUSTED_DOMAINS = {
     "netflix.com",
 }
 
-RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "instant").strip().lower() or "instant"
+RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "lightweight").strip().lower() or "lightweight"
 if RUNTIME_PROFILE not in {"instant", "lightweight", "balanced", "full"}:
-    RUNTIME_PROFILE = "instant"
+    RUNTIME_PROFILE = "lightweight"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -1279,7 +1279,10 @@ def read_url_logs(limit: int = 50) -> pd.DataFrame:
     if not URL_LOG_PATH.exists():
         return pd.DataFrame(columns=["row_id", *LOG_COLUMNS])
 
-    frame = pd.read_csv(URL_LOG_PATH)
+    try:
+        frame = pd.read_csv(URL_LOG_PATH)
+    except Exception:
+        return pd.DataFrame(columns=["row_id", *LOG_COLUMNS])
     numeric_columns = [
         "phishing_probability",
         "url_probability",
