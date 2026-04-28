@@ -53,7 +53,7 @@ summary_a, summary_b, summary_c = st.columns(3)
 summary_a.metric("Entries", str(len(logs)))
 summary_b.metric(
     "Phishing verdicts",
-    str(sum(1 for row in logs if row["prediction"] == "Phishing")) if logs else "0",
+    str(int((logs["prediction"] == "Phishing").sum())) if not logs.empty and "prediction" in logs.columns else "0",
 )
 summary_c.metric("Storage", str(Path("logs/url_prediction_log.csv")))
 
