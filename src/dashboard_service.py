@@ -19,6 +19,7 @@ import pandas as pd
 # Disable hf_transfer/Xet-backed downloads so the app uses the standard
 # Hugging Face client path, which is more reliable in constrained runtimes.
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DOWNLOAD_TIMEOUT"] = "60"
 
@@ -475,7 +476,6 @@ def _download_from_hugging_face(target_path: Path) -> Path:
             token=HF_MODEL_TOKEN,
             cache_dir=HF_CACHE_DIR,
             local_files_only=False,
-            force_download=True,
         )
 
     except Exception as exc:
@@ -932,7 +932,13 @@ def bootstrap_runtime() -> dict[str, str]:
     try:
         if HF_AUTO_DOWNLOAD and HF_MODEL_REPO_ID and not THRESHOLD_CONFIG_PATH.exists():
             _set_startup_status("running", "Loading branch threshold configuration.")
-            _ensure_model_file(THRESHOLD_CONFIG_PATH)
+            try:
+                _ensure_model_file(THRESHOLD_CONFIG_PATH)
+            except ServiceConfigurationError as exc:
+                _emit_runtime_log(
+                    "Branch threshold download failed; continuing with built-in defaults. "
+                    f"Reason: {exc}"
+                )
         if ENABLE_URL_MODEL or ENABLE_OCR_MODEL:
             _set_startup_status("running", "Loading DistilBERT tokenizer.")
             get_distilbert_tokenizer()
