@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 import warnings
 
 import pandas as pd
@@ -9,15 +8,17 @@ import streamlit as st
 from src.dashboard_service import (
     ServiceConfigurationError,
     append_url_log,
+    bootstrap_runtime,
     delete_url_log_entry,
     get_branch_availability,
     get_runtime_diagnostics,
     get_runtime_profile,
     predict_phishing,
     read_url_logs,
-    start_background_warmup,
 )
 from src.ui_theme import inject_theme, render_sidebar
+
+APP_BUILD_ID = "2026-04-28-streamlit-cloud-bootstrap"
 
 warnings.filterwarnings(
     "ignore",
@@ -53,7 +54,22 @@ def _load_logs() -> pd.DataFrame:
         return pd.DataFrame(columns=["row_id", "timestamp_utc", "url", "prediction", "phishing_probability"])
 
 
-start_background_warmup()
+@st.cache_resource(show_spinner=False)
+def _bootstrap_runtime_once() -> dict[str, str]:
+    return bootstrap_runtime()
+
+
+try:
+    with st.spinner("Preparing tokenizer and model bundles for this deployment..."):
+        startup_status = _bootstrap_runtime_once()
+except ServiceConfigurationError as exc:
+    st.error(str(exc))
+    st.caption(
+        "Streamlit Cloud startup stopped before enabling scans. "
+        "Verify the Hugging Face repo id, optional HF token secret, and runtime packages."
+    )
+    st.stop()
+
 diagnostics = get_runtime_diagnostics()
 runtime_profile = get_runtime_profile()
 branch_availability = get_branch_availability()
@@ -68,8 +84,10 @@ st.markdown(
         The interface keeps the scan surface up front while preserving model telemetry and recent cases.
       </div>
       <div class="top-strip">
+        <span class="pill">Build: {APP_BUILD_ID}</span>
         <span class="pill">Profile: {runtime_profile['name']}</span>
         <span class="pill">Branches: {", ".join(runtime_profile["active_branches"])}</span>
+        <span class="pill">Startup: {startup_status["state"]}</span>
         <span class="pill">Downloads: {"enabled" if runtime_profile["downloads_enabled"] else "disabled"}</span>
       </div>
     </section>
@@ -83,6 +101,8 @@ if actionable_issues:
     st.warning("Some required runtime assets are unavailable. Predictions for those branches will fail until fixed.")
     for issue in actionable_issues:
         st.caption(f"- {issue}")
+else:
+    st.caption(startup_status["message"])
 
 left_col, right_col = st.columns([1.75, 1.0], gap="large")
 
@@ -131,7 +151,7 @@ with right_col:
     st.markdown('<div class="preview-card">', unsafe_allow_html=True)
     st.markdown("Recent cases")
     if preview_logs.empty:
-        st.caption(f"No URL predictions logged yet. Entries will be saved to `{Path('logs/url_prediction_log.csv')}`.")
+        st.caption("No URL predictions logged yet. Entries will be saved to logs/url_prediction_log.csv.")
     else:
         for row in preview_logs.head(3).itertuples(index=False):
             info_col, action_col = st.columns([5.0, 1.1], gap="small")
