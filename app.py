@@ -169,7 +169,7 @@ with right_col:
                 )
             with action_col:
                 st.write("")
-                if st.button(":material/delete:", key=f"preview-delete-{row.row_id}", width="stretch"):
+                if st.button(":material/delete:", key=f"preview-delete-{row.row_id}", use_container_width=True):
                     delete_url_log_entry(int(row.row_id))
                     st.rerun()
         st.caption("Open the Audit Logs page from Streamlit's Pages menu.")
@@ -226,7 +226,7 @@ with result_left:
         )
         st.metric("Phishing probability", _score_text(result.probability))
         if uploaded_image is not None and image_bytes is not None:
-            st.image(image_bytes, caption=uploaded_image.name, width="stretch")
+            st.image(image_bytes, caption=uploaded_image.name, use_container_width=True)
 
 with result_right:
     st.markdown(
@@ -257,6 +257,6 @@ with result_right:
                     label_visibility="collapsed",
                 )
             with tabs[1]:
-                st.dataframe(_load_logs(), width="stretch", hide_index=True)
+                st.dataframe(_load_logs(), use_container_width=True, hide_index=True)
         else:
-            st.dataframe(_load_logs(), width="stretch", hide_index=True)
+            st.dataframe(_load_logs(), use_container_width=True, hide_index=True)
