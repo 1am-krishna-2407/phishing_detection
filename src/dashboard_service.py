@@ -184,7 +184,7 @@ PROFILE_DEFAULTS = {
     "full": {
         "hf_auto_download": True,
         "preload_url_model": False,
-        "use_quantized_text_models": True,
+        "use_quantized_text_models": False,
         "enable_url_model": True,
         "enable_ocr_model": True,
         "enable_image_model": True,
@@ -543,27 +543,69 @@ def _load_text_checkpoint(
     except ImportError as exc:
         raise _dependency_error("Text model loading", "torch") from exc
 
-    checkpoint_path, is_quantized = _resolve_text_checkpoint_path(checkpoint_path, device)
+    resolved_checkpoint_path, is_quantized = _resolve_text_checkpoint_path(checkpoint_path, device)
 
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    max_len = 128
+    def _restore_checkpoint(
+        target_model: "TextPhishingModel",
+        source_path: Path,
+        quantized: bool,
+        target_device: "torch.device",
+    ) -> tuple["TextPhishingModel", int, "torch.device"]:
+        checkpoint = torch.load(source_path, map_location=target_device)
+        max_len = 128
 
-    if isinstance(checkpoint, dict) and "max_len" in checkpoint:
-        max_len = int(checkpoint["max_len"])
+        if isinstance(checkpoint, dict) and "max_len" in checkpoint:
+            max_len = int(checkpoint["max_len"])
 
-    if is_quantized:
-        model = torch.quantization.quantize_dynamic(model.cpu(), {nn.Linear}, dtype=torch.qint8)
-        device = torch.device("cpu")
+        if quantized:
+            target_model = torch.quantization.quantize_dynamic(
+                target_model.cpu(),
+                {nn.Linear},
+                dtype=torch.qint8,
+            )
+            target_device = torch.device("cpu")
 
-    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-        model.load_state_dict(checkpoint["model_state_dict"])
-    else:
-        model.bert.load_state_dict(checkpoint)
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            target_model.load_state_dict(checkpoint["model_state_dict"])
+        else:
+            target_model.bert.load_state_dict(checkpoint)
+
+        return target_model, max_len, target_device
+
+    fallback_used = False
+
+    try:
+        model, max_len, device = _restore_checkpoint(
+            model,
+            resolved_checkpoint_path,
+            is_quantized,
+            device,
+        )
+    except Exception as exc:
+        if not is_quantized:
+            raise
+
+        _emit_runtime_log(
+            "Quantized text checkpoint load failed; retrying with float checkpoint. "
+            f"Reason: {exc}"
+        )
+        fallback_used = True
+        model = model.__class__().to(device)
+        model, max_len, device = _restore_checkpoint(
+            model,
+            checkpoint_path,
+            False,
+            device,
+        )
 
     model.to(device)
     model.eval()
-    if is_quantized:
-        _emit_runtime_log(f"Loaded quantized CPU text model `{checkpoint_path.name}`.")
+    if is_quantized and not fallback_used:
+        _emit_runtime_log(f"Loaded quantized CPU text model `{resolved_checkpoint_path.name}`.")
+    elif fallback_used:
+        _emit_runtime_log(
+            f"Loaded float text model fallback `{checkpoint_path.name}` after quantized load failure."
+        )
     return model, max_len
 
 
