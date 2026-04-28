@@ -74,12 +74,22 @@ OCR_MODEL_QUANTIZED_PATH = MODELS_DIR / "ocr_text_model_phase2_5_dynamic_int8.pt
 IMAGE_MODEL_PATH = MODELS_DIR / "image_model_phase2.pt"
 THRESHOLD_CONFIG_PATH = MODELS_DIR / "branch_thresholds.json"
 
-HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing-detection-models").strip()
+HF_MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "Krishna787/phishing_detection").strip()
 HF_MODEL_REVISION = os.getenv("HF_MODEL_REVISION", "").strip() or None
 HF_CACHE_DIR = os.getenv("HF_HOME", "").strip() or os.getenv("HUGGINGFACE_HUB_CACHE", "").strip() or None
 HF_TOKENIZER_REPO_ID = os.getenv("HF_TOKENIZER_REPO_ID", "distilbert-base-uncased").strip()
 HF_TOKENIZER_REVISION = os.getenv("HF_TOKENIZER_REVISION", "").strip() or None
-HF_TOKENIZER_DIR = MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__")
+HF_TOKENIZER_DIR_CANDIDATES = (
+    PROJECT_ROOT / "tokenizers" / HF_TOKENIZER_REPO_ID,
+    PROJECT_ROOT / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__"),
+    MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID,
+    MODELS_DIR / "tokenizers" / HF_TOKENIZER_REPO_ID.replace("/", "__"),
+)
+HF_TOKENIZER_DIR = next(
+    (path for path in HF_TOKENIZER_DIR_CANDIDATES if path.exists()),
+    HF_TOKENIZER_DIR_CANDIDATES[0],
+)
+HF_TOKENIZER_REMOTE_DIR = f"tokenizers/{HF_TOKENIZER_REPO_ID}"
 HF_TOKENIZER_PATTERNS = (
     "tokenizer.json",
     "tokenizer_config.json",
@@ -128,9 +138,9 @@ TRUSTED_DOMAINS = {
     "netflix.com",
 }
 
-RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "lightweight").strip().lower() or "lightweight"
+RUNTIME_PROFILE = os.getenv("MODEL_PROFILE", "full").strip().lower() or "full"
 if RUNTIME_PROFILE not in {"instant", "lightweight", "balanced", "full"}:
-    RUNTIME_PROFILE = "lightweight"
+    RUNTIME_PROFILE = "full"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -146,7 +156,7 @@ PROFILE_DEFAULTS = {
     "instant": {
         "hf_auto_download": False,
         "preload_url_model": False,
-        "use_quantized_text_models": False,
+        "use_quantized_text_models": True,
         "enable_url_model": False,
         "enable_ocr_model": False,
         "enable_image_model": False,
@@ -154,8 +164,8 @@ PROFILE_DEFAULTS = {
     },
     "lightweight": {
         "hf_auto_download": True,
-        "preload_url_model": True,
-        "use_quantized_text_models": False,
+        "preload_url_model": False,
+        "use_quantized_text_models": True,
         "enable_url_model": True,
         "enable_ocr_model": False,
         "enable_image_model": False,
@@ -163,8 +173,8 @@ PROFILE_DEFAULTS = {
     },
     "balanced": {
         "hf_auto_download": True,
-        "preload_url_model": True,
-        "use_quantized_text_models": False,
+        "preload_url_model": False,
+        "use_quantized_text_models": True,
         "enable_url_model": True,
         "enable_ocr_model": True,
         "enable_image_model": False,
@@ -172,8 +182,8 @@ PROFILE_DEFAULTS = {
     },
     "full": {
         "hf_auto_download": True,
-        "preload_url_model": True,
-        "use_quantized_text_models": False,
+        "preload_url_model": False,
+        "use_quantized_text_models": True,
         "enable_url_model": True,
         "enable_ocr_model": True,
         "enable_image_model": True,
@@ -188,6 +198,7 @@ ENABLE_URL_MODEL = _env_flag("ENABLE_URL_MODEL", PROFILE_DEFAULTS["enable_url_mo
 ENABLE_OCR_MODEL = _env_flag("ENABLE_OCR_MODEL", PROFILE_DEFAULTS["enable_ocr_model"])
 ENABLE_IMAGE_MODEL = _env_flag("ENABLE_IMAGE_MODEL", PROFILE_DEFAULTS["enable_image_model"])
 ENABLE_OCR_EXTRACTION = _env_flag("ENABLE_OCR_EXTRACTION", PROFILE_DEFAULTS["enable_ocr_extraction"])
+ALLOW_HEURISTIC_FALLBACKS = _env_flag("ALLOW_HEURISTIC_FALLBACKS", RUNTIME_PROFILE != "full")
 
 SUSPICIOUS_TEXT_TERMS = (
     "login",
@@ -231,6 +242,11 @@ _warmup_thread: threading.Thread | None = None
 _warmup_status = {
     "state": "idle",
     "message": "URL model has not started warming yet.",
+}
+_startup_lock = threading.Lock()
+_startup_state = {
+    "state": "idle",
+    "message": "Runtime bootstrap has not started yet.",
 }
 _hf_repo_files_lock = threading.Lock()
 _hf_repo_files_cache: dict[tuple[str, str | None], set[str]] = {}
@@ -338,6 +354,17 @@ def _copy_download_to_target(downloaded_path: Path, target_path: Path) -> Path:
     if downloaded_path.resolve() != target_path.resolve():
         shutil.copy2(downloaded_path, target_path)
     return target_path
+
+
+def _candidate_tokenizer_remote_filenames(filename: str) -> tuple[str, ...]:
+    folder_name = HF_TOKENIZER_REPO_ID.replace("/", "__")
+    raw_folder_name = HF_TOKENIZER_REPO_ID
+    return (
+        f"tokenizers/{raw_folder_name}/{filename}",
+        f"tokenizers/{folder_name}/{filename}",
+        f"tokenizers/{filename}",
+        filename,
+    )
 
 
 def _list_remote_repo_files(repo_id: str, revision: str | None) -> set[str]:
@@ -559,6 +586,7 @@ def get_runtime_profile() -> dict[str, Any]:
         "active_branches": active_branches,
         "heavy_models_enabled": ENABLE_IMAGE_MODEL or ENABLE_OCR_MODEL,
         "downloads_enabled": HF_AUTO_DOWNLOAD,
+        "allow_heuristic_fallbacks": ALLOW_HEURISTIC_FALLBACKS,
     }
 
 
@@ -577,19 +605,25 @@ def get_distilbert_tokenizer() -> "AutoTokenizer":
         except ImportError as exc:
             raise _dependency_error("Tokenizer loading", "transformers") from exc
 
+        local_tokenizer_error: Exception | None = None
         try:
-            _tokenizer_cache = AutoTokenizer.from_pretrained(HF_TOKENIZER_DIR, local_files_only=True)
+            _tokenizer_cache = AutoTokenizer.from_pretrained(
+                HF_TOKENIZER_DIR,
+                local_files_only=True,
+                use_fast=True,
+            )
             return _tokenizer_cache
-        except Exception:
+        except Exception as exc:
+            local_tokenizer_error = exc
             if not HF_AUTO_DOWNLOAD:
                 raise ServiceConfigurationError(
                     "Missing DistilBERT tokenizer files. Add the tokenizer under "
                     f"`{HF_TOKENIZER_DIR.relative_to(PROJECT_ROOT)}` or set `HF_AUTO_DOWNLOAD=1` "
                     "to download it from Hugging Face."
-                )
+                ) from exc
 
             _emit_runtime_log(
-                f"Starting Hugging Face tokenizer download for `{HF_TOKENIZER_REPO_ID}`."
+                f"Starting Hugging Face tokenizer download from `{HF_MODEL_REPO_ID}/{HF_TOKENIZER_REMOTE_DIR}`."
             )
             try:
                 _ensure_huggingface_hub("Tokenizer download")
@@ -597,14 +631,25 @@ def get_distilbert_tokenizer() -> "AutoTokenizer":
                     raise _dependency_error("Tokenizer download", "huggingface_hub")
                 HF_TOKENIZER_DIR.mkdir(parents=True, exist_ok=True)
                 for filename in HF_TOKENIZER_PATTERNS:
-                    downloaded_path = hf_hub_download(
-                        repo_id=HF_TOKENIZER_REPO_ID,
-                        filename=filename,
-                        revision=HF_TOKENIZER_REVISION,
-                        token=HF_MODEL_TOKEN,
-                        cache_dir=HF_CACHE_DIR,
-                        local_files_only=False,
-                    )
+                    downloaded_path = None
+                    last_error: Exception | None = None
+                    for remote_filename in _candidate_tokenizer_remote_filenames(filename):
+                        try:
+                            downloaded_path = hf_hub_download(
+                                repo_id=HF_MODEL_REPO_ID,
+                                filename=remote_filename,
+                                revision=HF_MODEL_REVISION if HF_MODEL_REVISION is not None else HF_TOKENIZER_REVISION,
+                                token=HF_MODEL_TOKEN,
+                                cache_dir=HF_CACHE_DIR,
+                                local_files_only=False,
+                            )
+                            break
+                        except Exception as exc:
+                            last_error = exc
+                    if downloaded_path is None:
+                        raise ServiceConfigurationError(
+                            f"Tokenizer file `{filename}` was not found in Hugging Face repo `{HF_MODEL_REPO_ID}`."
+                        ) from last_error
                     _copy_download_to_target(Path(downloaded_path), HF_TOKENIZER_DIR / filename)
                 _tokenizer_cache = AutoTokenizer.from_pretrained(
                     HF_TOKENIZER_DIR,
@@ -613,11 +658,11 @@ def get_distilbert_tokenizer() -> "AutoTokenizer":
                 )
             except Exception as exc:
                 raise ServiceConfigurationError(
-                    f"Failed to download tokenizer `{HF_TOKENIZER_REPO_ID}` from Hugging Face. "
-                    "Check the internet connection or add the tokenizer files locally."
-                ) from exc
+                    f"Failed to download tokenizer files from `{HF_MODEL_REPO_ID}/{HF_TOKENIZER_REMOTE_DIR}`. "
+                    "Check the repo contents, internet connection, or add the tokenizer files locally."
+                ) from (local_tokenizer_error or exc)
             _emit_runtime_log(
-                f"Finished Hugging Face tokenizer download for `{HF_TOKENIZER_REPO_ID}`."
+                f"Finished Hugging Face tokenizer download from `{HF_MODEL_REPO_ID}/{HF_TOKENIZER_REMOTE_DIR}`."
             )
             return _tokenizer_cache
 
@@ -786,7 +831,7 @@ def get_runtime_diagnostics() -> list[str]:
     elif missing_tokenizer_files and ENABLE_URL_MODEL and HF_AUTO_DOWNLOAD:
         issues.append(
             "DistilBERT tokenizer files are missing locally. They will be downloaded from "
-            f"Hugging Face repo `{HF_TOKENIZER_REPO_ID}` on first text prediction."
+            f"`{HF_MODEL_REPO_ID}/{HF_TOKENIZER_REMOTE_DIR}` on first text prediction."
         )
 
     if not ENABLE_URL_MODEL:
@@ -819,7 +864,7 @@ def _describe_checkpoint_availability(
                 filename for filename in HF_TOKENIZER_PATTERNS if not (HF_TOKENIZER_DIR / filename).exists()
             ]
             if missing_tokenizer_files:
-                detail += f" Tokenizer will be fetched from `{HF_TOKENIZER_REPO_ID}` on first use."
+                detail += f" Tokenizer will be fetched from `{HF_MODEL_REPO_ID}/{HF_TOKENIZER_REMOTE_DIR}` on first use."
         return BranchAvailability(branch=branch, status="ready", detail=detail)
 
     if not HF_AUTO_DOWNLOAD or not HF_MODEL_REPO_ID:
@@ -829,19 +874,13 @@ def _describe_checkpoint_availability(
             detail=f"Checkpoint missing locally: `{checkpoint_path.name}`.",
         )
 
-    try:
-        remote_filename = _resolve_remote_model_filename(checkpoint_path)
-    except Exception as exc:
-        return BranchAvailability(
-            branch=branch,
-            status="blocked",
-            detail=f"Unable to verify `{checkpoint_path.name}` in `{HF_MODEL_REPO_ID}`: {exc}",
-        )
-
     return BranchAvailability(
         branch=branch,
         status="remote",
-        detail=f"Will load from Hugging Face repo `{HF_MODEL_REPO_ID}` as `{remote_filename}`.",
+        detail=(
+            f"Checkpoint missing locally: `{checkpoint_path.name}`. "
+            f"It can be downloaded from Hugging Face repo `{HF_MODEL_REPO_ID}` when this branch is enabled."
+        ),
     )
 
 
@@ -873,6 +912,54 @@ def _set_warmup_status(state: str, message: str) -> None:
     with _warmup_lock:
         _warmup_status["state"] = state
         _warmup_status["message"] = message
+
+
+def _set_startup_status(state: str, message: str) -> None:
+    with _startup_lock:
+        _startup_state["state"] = state
+        _startup_state["message"] = message
+
+
+def bootstrap_runtime() -> dict[str, str]:
+    with _startup_lock:
+        if _startup_state["state"] == "ready":
+            return dict(_startup_state)
+        if _startup_state["state"] == "running":
+            return dict(_startup_state)
+        _startup_state["state"] = "running"
+        _startup_state["message"] = "Preparing tokenizer and model bundles."
+
+    try:
+        if HF_AUTO_DOWNLOAD and HF_MODEL_REPO_ID and not THRESHOLD_CONFIG_PATH.exists():
+            _set_startup_status("running", "Loading branch threshold configuration.")
+            _ensure_model_file(THRESHOLD_CONFIG_PATH)
+        if ENABLE_URL_MODEL or ENABLE_OCR_MODEL:
+            _set_startup_status("running", "Loading DistilBERT tokenizer.")
+            get_distilbert_tokenizer()
+        if ENABLE_URL_MODEL:
+            _set_startup_status("running", "Loading URL model bundle.")
+            get_url_bundle()
+        if ENABLE_OCR_MODEL:
+            _set_startup_status("running", "Loading OCR text model bundle.")
+            get_ocr_bundle()
+        if ENABLE_IMAGE_MODEL:
+            _set_startup_status("running", "Loading image model bundle.")
+            get_image_bundle()
+        if ENABLE_OCR_EXTRACTION and shutil.which("tesseract") is None:
+            raise ServiceConfigurationError(
+                "Tesseract binary not found. Add `tesseract-ocr` to `packages.txt` for Streamlit Cloud."
+            )
+    except Exception as exc:
+        _set_startup_status("error", str(exc))
+        raise
+
+    _set_startup_status("ready", "Tokenizer and enabled model bundles are ready.")
+    return get_startup_status()
+
+
+def get_startup_status() -> dict[str, str]:
+    with _startup_lock:
+        return dict(_startup_state)
 
 
 def _warm_url_model() -> None:
@@ -1009,13 +1096,18 @@ def heuristic_image_risk(image_bytes: bytes, ocr_text: str | None = None) -> flo
 def predict_url_probability(url: str) -> float:
     normalized_url = normalize_url(url)
     prepared_url = prepare_text_for_model(normalized_url, "urls_phase1_csv")
+    heuristic_probability = heuristic_url_risk(normalized_url)
 
     if not ENABLE_URL_MODEL:
-        raise ServiceConfigurationError(
-            "URL model is disabled by the current runtime profile. Enable the URL model to run URL predictions."
-        )
+        return heuristic_probability
 
-    return _predict_text_probability(prepared_url, get_url_bundle)
+    try:
+        return _predict_text_probability(prepared_url, get_url_bundle)
+    except Exception as exc:
+        if not ALLOW_HEURISTIC_FALLBACKS:
+            raise ServiceConfigurationError(f"URL model inference failed: {exc}") from exc
+        _emit_runtime_log(f"Using URL heuristic fallback: {exc}")
+        return heuristic_probability
 
 
 def extract_ocr_text_from_bytes(image_bytes: bytes) -> str:
@@ -1041,7 +1133,9 @@ def predict_ocr_probability(text: str) -> float:
 
     try:
         model_probability = _predict_text_probability(text, get_ocr_bundle)
-    except ServiceConfigurationError as exc:
+    except Exception as exc:
+        if not ALLOW_HEURISTIC_FALLBACKS:
+            raise ServiceConfigurationError(f"OCR text model inference failed: {exc}") from exc
         _emit_runtime_log(f"Using OCR heuristic fallback: {exc}")
         return heuristic_probability
 
@@ -1051,7 +1145,9 @@ def predict_ocr_probability(text: str) -> float:
 def try_predict_ocr_probability(text: str) -> float | None:
     try:
         return predict_ocr_probability(text)
-    except ServiceConfigurationError as exc:
+    except Exception as exc:
+        if not ALLOW_HEURISTIC_FALLBACKS:
+            raise
         _emit_runtime_log(f"Skipping OCR text model: {exc}")
         return None
 
@@ -1071,6 +1167,8 @@ def predict_image_probability(image_bytes: bytes, ocr_text: str | None = None) -
     try:
         model, device = get_image_bundle()
     except ServiceConfigurationError as exc:
+        if not ALLOW_HEURISTIC_FALLBACKS:
+            raise
         _emit_runtime_log(f"Using image heuristic fallback: {exc}")
         return heuristic_probability
 
