@@ -71,7 +71,7 @@ st.markdown(
 )
 
 if logs.empty:
-    st.info(f"No URL predictions logged yet. Entries will be saved to `{Path('logs/url_prediction_log.csv')}`.")
+    st.info("No URL predictions logged yet. Entries will be saved to logs/url_prediction_log.csv.")
 else:
     filter_cols = st.columns([1.1, 1.1, 2.4])
     prediction_filter = filter_cols[0].selectbox("Verdict", ["All", "Phishing", "Legitimate"])
@@ -105,7 +105,7 @@ else:
     if not table.empty:
         for column in ("phishing_probability", "url_probability", "image_probability", "ocr_probability"):
             table[column] = table[column].map(_score_text)
-    st.dataframe(table, width="stretch", hide_index=True)
+    st.dataframe(table, use_container_width=True, hide_index=True)
 
     st.markdown("")
     for row in filtered.itertuples(index=False):
@@ -122,7 +122,7 @@ else:
                 ],
                 columns=["Field", "Value"],
             )
-            st.dataframe(details, width="stretch", hide_index=True)
-            if st.button("Delete entry", key=f"delete-log-{row.row_id}", width="stretch"):
+            st.dataframe(details, use_container_width=True, hide_index=True)
+            if st.button("Delete entry", key=f"delete-log-{row.row_id}", use_container_width=True):
                 delete_url_log_entry(int(row.row_id))
                 st.rerun()
