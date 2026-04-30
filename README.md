@@ -79,10 +79,13 @@ PHISHING DETECTION/
 Due to size constraints, pretrained models and datasets are hosted externally.
 
 👉 **Models (Drive Folder):**
-[https://drive.google.com/drive/folders/1JqW3P-Cf-226Z4xd8t2l_EAa7wAmOife](https://drive.google.com/drive/folders/1JqW3P-Cf-226Z4xd8t2l_EAa7wAmOife)
+[https://huggingface.co/Krishna787/phishing_detection]((https://huggingface.co/Krishna787/phishing_detection))
 
 👉 **Dataset (Drive File):**
 [https://drive.google.com/file/d/1rUaBTgoYQeQAL8LaYEO0VhOOmZFL7kM1/view?usp=drive_link](https://drive.google.com/file/d/1rUaBTgoYQeQAL8LaYEO0VhOOmZFL7kM1/view?usp=drive_link)
+
+👉 **Deployed Link :**
+[https://phishing-detection-23.streamlit.app/](https://phishing-detection-23.streamlit.app/)
 
 After downloading, place them in:
 
