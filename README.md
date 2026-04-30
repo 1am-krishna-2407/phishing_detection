@@ -79,7 +79,7 @@ PHISHING DETECTION/
 Due to size constraints, pretrained models and datasets are hosted externally.
 
 👉 **Models (Drive Folder):**
-[https://huggingface.co/Krishna787/phishing_detection]((https://huggingface.co/Krishna787/phishing_detection))
+[https://huggingface.co/Krishna787/phishing_detection](https://huggingface.co/Krishna787/phishing_detection)
 
 👉 **Dataset (Drive File):**
 [https://drive.google.com/file/d/1rUaBTgoYQeQAL8LaYEO0VhOOmZFL7kM1/view?usp=drive_link](https://drive.google.com/file/d/1rUaBTgoYQeQAL8LaYEO0VhOOmZFL7kM1/view?usp=drive_link)
