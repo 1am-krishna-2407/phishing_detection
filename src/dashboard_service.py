@@ -70,6 +70,8 @@ _load_local_env_file(PROJECT_ROOT / ".env")
 
 TEXT_MODEL_PATH = MODELS_DIR / "text_model_phase1.pt"
 OCR_MODEL_PATH = MODELS_DIR / "ocr_text_model_phase2_5.pt"
+TEXT_MODEL_QUANTIZED_PATH = MODELS_DIR / "text_model_phase1_dynamic_int8.pt"
+OCR_MODEL_QUANTIZED_PATH = MODELS_DIR / "ocr_text_model_phase2_5_dynamic_int8.pt"
 IMAGE_MODEL_PATH = MODELS_DIR / "image_model_phase2.pt"
 THRESHOLD_CONFIG_PATH = MODELS_DIR / "branch_thresholds.json"
 
@@ -99,6 +101,13 @@ HF_AUTH_TOKEN_ENV_KEYS = (
     "HUGGING_FACE_HUB_TOKEN",
     "HUGGINGFACE_TOKEN",
 )
+HF_MODEL_FILE_ALIASES = {
+    TEXT_MODEL_PATH.name: (TEXT_MODEL_PATH.name, "text_model_phase1_dynamic_int8.pt"),
+    OCR_MODEL_PATH.name: (OCR_MODEL_PATH.name, "ocr_text_model_phase2_5_dynamic_int8.pt"),
+    IMAGE_MODEL_PATH.name: (IMAGE_MODEL_PATH.name,),
+    TEXT_MODEL_QUANTIZED_PATH.name: (TEXT_MODEL_QUANTIZED_PATH.name, TEXT_MODEL_PATH.name),
+    OCR_MODEL_QUANTIZED_PATH.name: (OCR_MODEL_QUANTIZED_PATH.name, OCR_MODEL_PATH.name),
+}
 
 LOG_COLUMNS = [
     "timestamp_utc",
